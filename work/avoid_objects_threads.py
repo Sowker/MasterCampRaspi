@@ -152,30 +152,31 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
 
         # Lire les capteurs bruts (gauche, milieu, droit)
         current_action = robot.state.line_action
+        print("ACTION LINE:", action_direction(current_action))
 
         # Comportement d'ÉVITEMENT (s'inspire de t7 mais inversé)
         # Priorité : détection droite -> tourner à gauche; détection gauche -> tourner à droite
-        if robot.state.line_action == CirclePosition.TURN_RIGHT_SOFT:
+        if current_action == CirclePosition.TURN_RIGHT_SOFT:
             # Approche depuis la droite -> tourner doucement à gauche
             robot.head.steer_left(15)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
-        elif robot.state.line_action == CirclePosition.TURN_RIGHT_HARD:
+        elif current_action == CirclePosition.TURN_RIGHT_HARD:
             # Trop à droite -> tourner fort à gauche
             robot.head.steer_left(35)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
-        elif robot.state.line_action == CirclePosition.TURN_LEFT_SOFT:
+        elif current_action == CirclePosition.TURN_LEFT_SOFT:
             # Approche depuis la gauche -> tourner doucement à droite
             robot.head.steer_right(15)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
-        elif robot.state.line_action == CirclePosition.TURN_LEFT_HARD:
+        elif current_action == CirclePosition.TURN_LEFT_HARD:
             # Trop à gauche -> tourner fort à droite
             robot.head.steer_right(35)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
-        elif robot.state.line_action ==  CirclePosition.STRAIGHT:
+        elif current_action ==  CirclePosition.STRAIGHT:
             # Ligne centrée -> tout droit
             robot.head.steer_center()
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
@@ -241,13 +242,14 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         # the sleep time allow to do a bigger or smaller maneuver depending on where is the obj (obj_angle)
         if obj_angle <= 22:
             print("object close")
-            sleep_time = 2
+            sleep_time = 2.5
         elif obj_angle <= 27:
             print("object mid")
-            sleep_time = 1.5
+            print("prout")
+            sleep_time = 2
         else:
             print("object far")
-            sleep_time = 1
+            sleep_time = 1.5
         # sleep_time = 0.1 + 0.1 * (SCAN_ANGLE/2 - obj_angle)
         # sleep_time = 2 * (SCAN_ANGLE/2 - obj_angle)
         # sleep_time = 2
