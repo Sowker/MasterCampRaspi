@@ -171,7 +171,7 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
             stop = False  # RAZ du flag d'arrêt si on se remet à rouler
         else:
             if stop:
-                if time.time() <= post_time + 2:
+                if time.time() <= post_time + 4:
                     robot.head.set_angle_motor(0, 180 - target_angle)
                 else:
                     robot.motor.stop()
