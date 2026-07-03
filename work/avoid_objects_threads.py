@@ -241,10 +241,10 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         # the sleep time allow to do a bigger or smaller maneuver depending on where is the obj (obj_angle)
         if obj_angle <= 22:
             print("object close")
-            sleep_time = 1.8
+            sleep_time = 2
         elif obj_angle <= 27:
             print("object mid")
-            sleep_time = 1.4
+            sleep_time = 1.5
         else:
             print("object far")
             sleep_time = 1
