@@ -292,7 +292,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
 
             # DRIVING AVOID OBJECTS LOGIC
             if scan:
-                actual_scan = scan
+                actual_scan = scan.copy()
                 min_dist = min(actual_scan)
                 if min_dist <= SCAN_DIST_ACTION:
                     # doing a second scan when we are stopped
