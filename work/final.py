@@ -24,6 +24,8 @@ from labyrinthe_threads import (
     thread_drive as labyrinthe_thread_drive
 )
 
+from transitions import *
+
 import camera_line3
 
 frame_lock = threading.Lock()
@@ -36,63 +38,6 @@ app_global = Flask(__name__)
 robot = None
 step_manager = None
 log = None
-
-
-# ==========================================
-# SÉQUENCES DE CALIBRATION MATÉRIELLE
-# ==========================================
-
-def calibration_sequence_IR_to_obstacles(robot_instance: Robot) -> None:
-    """Séquence de mouvements pour se préparer à l'évitement d'obstacles."""
-    global log, target_step
-    log.info("[SYS] INIT_CALIBRATION: OBSTACLES -> Reset odometry & sensors")
-
-    with robot_instance.state.lock:
-        robot_instance.state.running = False
-
-    robot_instance.motor.reset()
-    robot_instance.head.set_angle_motor(0, 90)
-    time.sleep(0.3)
-
-    log.info("[SYS] CALIBRATION_DONE: OBSTACLES -> Transit requested to 'Obstacles'")
-    target_step = "Obstacles"
-
-
-def calibration_sequence_obstacles_to_camera_line(robot_instance: Robot) -> None:
-    """Séquence pour baisser la tête de la caméra vers le sol pour le suivi de ligne rouge."""
-    global log, target_step
-    log.info("[SYS] INIT_CALIBRATION: RED_LINE -> Pitching camera down (60deg)")
-
-    with robot_instance.state.lock:
-        robot_instance.state.running = False
-
-    robot_instance.motor.reset()
-    robot_instance.head.set_angle_motor(2, 60)
-    time.sleep(0.3)
-
-    log.info("[SYS] CALIBRATION_DONE: RED_LINE -> Transit requested to 'Camera Line'")
-    target_step = "Camera Line"
-
-
-def calibration_sequence_camera_to_labyrinth(robot_instance: Robot) -> None:
-    """Séquence de calibration matérielle pour le labyrinthe."""
-    global log, target_step
-    log.info("[SYS] INIT_CALIBRATION: LABYRINTH -> Aligning wheels & camera")
-
-    with robot_instance.state.lock:
-        robot_instance.state.running = False
-
-    robot_instance.motor.reset()
-    robot_instance.head.set_angle_motor(0, 110)
-    robot_instance.motor.drive(camera_line3.Direction.FORWARD, 20, fast_accel=True)
-    time.sleep(0.5)
-    robot_instance.motor.reset()
-    robot_instance.head.set_angle_motor(0, 90)
-
-    log.info("[SYS] CALIBRATION_DONE: LABYRINTH -> Transit requested to 'Labyrinthe'")
-    target_step = "Labyrinthe"
-
-
 
 class StepConfig:
     def __init__(self, camera_angle: int, thread_factory: Callable[[], List[threading.Thread]]):
@@ -148,7 +93,7 @@ class RobotStepManager:
             "Calibration Obstacles": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence_to_obstacles, args=(robot_instance,),
+                    threading.Thread(target=calibration_sequence_IR_to_obstacles, args=(robot_instance,),
                                      name="CALIB_OBST", daemon=True)
                 ]
             ),
@@ -159,7 +104,7 @@ class RobotStepManager:
             "Calibration Ligne Rouge": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence_to_camera_line, args=(robot_instance,),
+                    threading.Thread(target=calibration_sequence_obstacles_to_camera_line, args=(robot_instance,),
                                      name="CALIB_ROUGE", daemon=True)
                 ]
             ),
@@ -230,9 +175,6 @@ class RobotStepManager:
             step_config.stop()
 
 
-# ==========================================
-# CAPTURE GLOBAL & DÉTECTION VISION
-# ==========================================
 
 def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
     global latest_frame, system_running, target_step, step_manager
@@ -248,7 +190,7 @@ def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
             with frame_lock:
                 latest_frame = frame_bgr.copy()
 
-            roi_bottom = frame_bgr[420:480, :]
+            roi_bottom = frame_bgr[450:480, :]
             hsv = cv2.cvtColor(roi_bottom, cv2.COLOR_BGR2HSV)
             mask = cv2.inRange(hsv, lower_blue, upper_blue)
             blue_pixels = cv2.countNonZero(mask)
@@ -257,13 +199,11 @@ def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
                 current = step_manager.current_step if step_manager else ""
 
                 if current == "Line following" and target_step == "Line following":
-                    log_instance.warning(
-                        f"[CV] BEACON_DETECTED: Blue mass bottom ({blue_pixels}px) -> Intercept Line following")
+                    log_instance.warning(f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Suivi Ligne IR")
                     target_step = "Calibration Obstacles"
 
                 elif current == "Obstacles" and target_step == "Obstacles":
-                    log_instance.warning(
-                        f"[CV] BEACON_DETECTED: Blue mass bottom ({blue_pixels}px) -> Intercept Obstacles")
+                    log_instance.warning(f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Obstacles")
                     target_step = "Calibration Ligne Rouge"
 
         except Exception:
@@ -401,7 +341,7 @@ def web_stop():
     with robot.state.lock:
         robot.state.running = False
     robot.motor.stop()
-    log.warning("[NET] HTTP_POST: /control/stop -> Force motor shutdown")
+    log.warning("[NET] HTTP_POST: /control/stop -> Arrêt forcé des moteurs")
     return jsonify({"status": "success", "robot_running": False, "current_step": step_manager.current_step})
 
 
@@ -412,18 +352,16 @@ def web_change_mode():
     if mode_id in step_manager.step_mapping:
         next_step = step_manager.step_mapping[mode_id]
         target_step = next_step
-        log.info(f"[NET] HTTP_POST: /control/mode?mode={mode_id} -> Force transition to '{next_step}'")
+        log.info(f"[NET] HTTP_POST: /control/mode?mode={mode_id} -> Transition forcée vers '{next_step}'")
         return jsonify({"status": "success", "robot_running": robot.state.running, "current_step": next_step})
     return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
 
-# ==========================================
-# BOUCLE PRINCIPALE (MAIN EVENT LOOP)
-# ==========================================
-
 if __name__ == "__main__":
     log = get_logger("MAIN")
-    log.info(">>> STARTING TEAM C CORE SYSTEM v2.6 <<<")
+    log.info("╔══════════════════════════════════════════════╗")
+    log.info("║  Robot Line Follower — Team C — SE 2026      ║")
+    log.info("╚══════════════════════════════════════════════╝")
 
     args = parse_args()
     robot = Robot(args)
@@ -453,14 +391,14 @@ if __name__ == "__main__":
     for gt in global_threads:
         gt.start()
 
-    log.info("[NET] Flask server online binding on http://0.0.0.0:5001")
+    log.info("[NET] Serveur Flask en ligne sur http://0.0.0.0:5001")
 
     lost_line_timestamp = None
 
     try:
         while True:
             if step_manager.current_step != target_step:
-                log.info(f"[SYS] TRANSIT: '{step_manager.current_step}' -> '{target_step}'")
+                log.info(f"[SYS] TRANSITION: '{step_manager.current_step}' -> '{target_step}'")
                 step_manager.transition_to(target_step)
                 lost_line_timestamp = None
 
@@ -473,7 +411,7 @@ if __name__ == "__main__":
                         lost_line_timestamp = time.time()
                     elif time.time() - lost_line_timestamp >= 2.0:
                         log.warning(
-                            "[SYS] KEEPALIVE_TIMEOUT: Red line lost > 2.0s. Falling back to Calibration Labyrinthe")
+                            "[SYS] KEEPALIVE_TIMEOUT: Ligne rouge perdue > 2.0s. Bascule vers Calibration Labyrinthe")
                         target_step = "Calibration Labyrinthe"
                 else:
                     lost_line_timestamp = None
@@ -481,10 +419,10 @@ if __name__ == "__main__":
             time.sleep(0.05)
 
     except KeyboardInterrupt:
-        log.warning("[SYS] SIGINT received, initializing shutdown...")
+        log.warning("[SYS] Signal SIGINT reçu, initialisation de la procédure d'arrêt...")
 
     finally:
-        log.info("[SYS] SHUTDOWN: Stopping active tasks...")
+        log.info("[SYS] ARRET: Interruption des tâches actives...")
         system_running = False
         with robot.state.lock:
             robot.state.running = False
@@ -495,4 +433,4 @@ if __name__ == "__main__":
         except Exception:
             pass
         robot.shutdown()
-        log.info("[SYS] HALT. System terminated safely.")
+        log.info("[SYS] HALT. Système arrêté en toute sécurité.")
