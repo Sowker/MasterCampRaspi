@@ -320,6 +320,9 @@ if __name__ == "__main__":
     robot = Robot(args)
     robot.init()
 
+    with robot.state.lock:
+        robot.state.running = False
+
     if not hasattr(robot.state, 'calculated_angle'):
         robot.state.calculated_angle = 90
 
