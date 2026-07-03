@@ -50,6 +50,9 @@ from TransitionLineFollowing import (
     thread_camera_loop as trans_thread_camera_loop
 )
 
+from avoid_objects_threads import thread_ultrasonic_scanning, thread_object_controller, thread_line_detect_avoid, thread_avoid_line_controller
+
+
 frame_lock = threading.Lock()
 latest_frame = None
 system_running = True
@@ -141,7 +144,18 @@ class RobotStepManager:
             "Obstacles": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
-
+                    threading.Thread(target=thread_ultrasonic_scanning,
+                                     args=(robot_instance, args_instance.sensor_interval),
+                                     name="US", daemon=True),
+                    threading.Thread(target=thread_object_controller,
+                                     args=(robot_instance, args_instance.sensor_interval),
+                                     name="CTRL_OBJ", daemon=True),
+                    threading.Thread(target=thread_line_detect_avoid,
+                                     args=(robot_instance, args_instance.sensor_interval),
+                                     name="LINE_DETECT", daemon=True),
+                    threading.Thread(target=thread_avoid_line_controller,
+                                     args=(robot_instance, args_instance.sensor_interval),
+                                     name="CTRL_LINE", daemon=True)
                 ]
             ),
             "Calibration Ligne Rouge": StepConfig(
