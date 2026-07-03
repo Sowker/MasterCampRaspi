@@ -140,7 +140,9 @@ class RobotStepManager:
             ),
             "Obstacles": StepConfig(
                 camera_angle=60,
-                thread_factory=lambda: []
+                thread_factory=lambda: [
+
+                ]
             ),
             "Calibration Ligne Rouge": StepConfig(
                 camera_angle=90,
