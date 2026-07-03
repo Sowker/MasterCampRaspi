@@ -187,9 +187,6 @@ class RobotStepManager:
 # FONCTIONS POUR LA STATE MACHINE
 
 def main(robot: Robot, args: str, camera: Picamera2, log: str):
-    log.info("╔══════════════════════════════════════════════╗")
-    log.info("║  Robot Line Follower — Team C — SE 2026      ║")
-    log.info("╚══════════════════════════════════════════════╝")
 
     # Instanciation de la machine à états
     step_manager = RobotStepManager(robot, camera, args)
@@ -203,9 +200,10 @@ def main(robot: Robot, args: str, camera: Picamera2, log: str):
         if not robot.state.running:
             return  # CHANGED: Using return instead of break here since we aren't in a loop yet
         robot.state.action = "Transition Line following"
+    print("TRANSITION LINE FOLLOWING----------------------------------------------")
 
     # Variable that hold the action of the robot
-    action = ""
+    action = "Transition Line following"
 
     while True:
         with robot.state.lock:
@@ -217,9 +215,9 @@ def main(robot: Robot, args: str, camera: Picamera2, log: str):
             match action:
                 case "Transition Line following":
                     step_manager.transition_to("Transition Line following")
-                    print("TRANSITION LINE FOLLOWING ")
+                    print("TRANSITION LINE FOLLOWING ------------------------")
                 case "Line following":
-                    print("LINE FOLLOWING")
+                    print("LINE FOLLOWING--------------------------------")
                     step_manager.transition_to("Line following")
                 case "Obstacles":
                     step_manager.transition_to("Obstacles")
