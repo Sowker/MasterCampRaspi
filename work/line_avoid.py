@@ -40,9 +40,10 @@ class CirclePosition(IntEnum):
 
 # ── Constantes ─────────────────────────────────────────────────
 
-PIN_LINE_LEFT = 22
+# with sensor reversed
+PIN_LINE_LEFT = 17
 PIN_LINE_MIDDLE = 27
-PIN_LINE_RIGHT = 17
+PIN_LINE_RIGHT = 22
 
 
 # ═══════════════════════════════════════════════════════════════════
