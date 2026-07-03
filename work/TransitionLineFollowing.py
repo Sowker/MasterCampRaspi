@@ -60,60 +60,64 @@ def get_black_mask(roi: np.ndarray) -> np.ndarray:
 
 
 def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
-    """Analyse l'image pour trouver une ligne noire et s'y arrêter."""
+    """Analyse l'image pour trouver une ligne, s'aligner dessus, puis s'arrêter."""
     height, width = frame.shape[:2]
     center_x = width // 2
     output = frame.copy()
 
-    # Définition des zones d'intérêt (ROIs)
+    # Définition des zones d'intérêt (ROIs) - On se concentre sur le bas pour l'alignement
     roi_low_top, roi_low_bot = int(height * 0.70), int(height * 0.90)
-    roi_high_top, roi_high_bot = int(height * 0.20), int(height * 0.40)
-
     mask_low = get_black_mask(frame[roi_low_top:roi_low_bot, 0:width])
-    mask_high = get_black_mask(frame[roi_high_top:roi_high_bot, 0:width])
-
     M_low = cv2.moments(mask_low)
-    M_high = cv2.moments(mask_high)
 
     # Affichage des lignes de guidage
     cv2.line(output, (0, roi_low_top), (width, roi_low_top), (0, 140, 255), 1)
-    cv2.line(output, (0, roi_high_top), (width, roi_high_top), (0, 255, 255), 1)
     cv2.line(output, (center_x, 0), (center_x, height), (255, 0, 0), 1)
 
     line_seen = "NON"
+    final_angle_delta = 0.0
+    calculated_speed = 0
+    stable_dir = "AUCUNE"
+    border_color = (0, 255, 0)
 
-    # Vérification de la présence de la ligne dans la zone basse
+    # ── LOGIQUE D'ALIGNEMENT ET TRANSITION ──
     if M_low["m00"] > MIN_LINE_AREA:
+        line_seen = "OUI"
+
+        # Position X du centre de la ligne noire
         cx_low = int(M_low["m10"] / M_low["m00"])
         cy_low = roi_low_top + int(M_low["m01"] / M_low["m00"])
         cv2.circle(output, (cx_low, cy_low), 6, (0, 255, 0), -1)
-        line_seen = "OUI"
 
-    # Vérification de la présence de la ligne dans la zone haute
-    if M_high["m00"] > MIN_LINE_AREA:
-        cx_high = int(M_high["m10"] / M_high["m00"])
-        cy_high = roi_high_top + int(M_high["m01"] / M_high["m00"])
-        cv2.circle(output, (cx_high, cy_high), 6, (0, 255, 255), -1)
-        line_seen = "OUI"
+        # Calcul de l'erreur par rapport au centre de l'image (en pixels)
+        error_px = cx_low - center_x
 
-    # ── LOGIQUE DE RECHERCHE ET TRANSITION D'ÉTAT ──
-    if line_seen == "OUI":
-        # La ligne est trouvée ! On s'arrête et on change d'état.
-        final_angle_delta = 0.0
-        calculated_speed = 0
-        stable_dir = "LIGNE TROUVÉE - ARRÊT"
-        border_color = (0, 0, 255)
+        # On braque proportionnellement à l'erreur (MAX_STEER_DELTA = 45)
+        final_angle_delta = (error_px / center_x) * 45
 
-        # Transition vers l'état suivant
-        with robot_instance.state.lock:
-            robot_instance.state.action = "Line following"
+        # Si l'erreur est très petite, la ligne est au milieu : on s'arrête !
+        if abs(error_px) <= 25:
+            final_angle_delta = 0.0
+            calculated_speed = 0
+            stable_dir = "CENTRÉ SUR LA LIGNE - ARRÊT"
+            border_color = (0, 0, 255)  # Rouge (Arrêt)
+
+            # Transition vers l'état suivant
+            with robot_instance.state.lock:
+                robot_instance.state.action = "Line following"
+
+        else:
+            # La ligne est visible mais pas centrée : on tourne en roulant doucement
+            calculated_speed = 37  # SPEED_MIN_PCT
+            stable_dir = f"AJUSTEMENT ({error_px}px)"
+            border_color = (255, 165, 0)  # Orange (Ajustement)
 
     else:
         # Aucune ligne en vue, on roule tout droit pour la chercher.
         final_angle_delta = 0.0
         calculated_speed = SPEED_MAX_PCT
         stable_dir = "RECHERCHE LIGNE..."
-        border_color = (0, 255, 0)
+        border_color = (0, 255, 0)  # Vert (Recherche)
 
     # Récupération sécurisée de l'état ultrason / arrêt d'urgence avant envoi moteur
     with robot_instance.state.lock:
@@ -145,7 +149,8 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
 
 # THREADS MATÉRIELS ET SENSEURS ASYNCHRONES
 def thread_controller_camera_line(robot: Robot, interval: float) -> None:
-    """Boucle matérielle principale d'actionnement de la propulsion et direction."""
+    """Boucle des mouvements du robot"""
+    stop = False
     while True:
         with robot.state.lock:
             if not robot.state.running or not system_running:
@@ -160,12 +165,26 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
             time.sleep(interval)
             continue
 
+        print(f"Tagert angle : {target_angle}")
         if target_speed > 0:
+            print("Run")
             robot.head.set_angle_motor(0, 180 - target_angle)
             robot.motor.drive(Direction.FORWARD, target_speed, fast_accel=True)
         else:
-            robot.motor.stop()
-            robot.head.set_angle_motor(0, STEER_CENTER_DEG)
+            if stop:
+                if time.time() <= robot.state.post_time + 2:
+                    print("in the couter to stop")
+                    robot.head.set_angle_motor(0, 180 - target_angle)
+                else:
+                    print("STOP")
+                    robot.motor.stop()
+                    robot.head.set_angle_motor(0, STEER_CENTER_DEG)
+            else :
+                print("Detect that it need to stop")
+                stop = True
+                with robot.state.lock:
+                    robot.state.post_time = time.time()
+
 
         time.sleep(interval)
 
