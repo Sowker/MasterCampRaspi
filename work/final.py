@@ -502,7 +502,6 @@ if __name__ == "__main__":
     step_manager.initialize()
 
     # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
-    global_threads =[
     global_threads = [
         threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
         threading.Thread(target=main, args=(robot, args, camera, log), name="STATE_MACHINE", daemon=True)
