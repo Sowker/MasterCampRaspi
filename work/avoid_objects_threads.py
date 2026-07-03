@@ -83,6 +83,7 @@ def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
                 break
 
         scan = scan_cm() # scanning and putting the result in the global scan variable
+        if MODE == MODE_AVOID_LINE: return
 
 def thread_line_detect_avoid(robot: Robot, interval: float) -> None:
     """
