@@ -6,13 +6,11 @@ import numpy as np
 from typing import Dict, List, Callable
 from flask import Flask, Response, render_template_string, request, jsonify
 
-# Configuration matérielle
 from picamera2 import Picamera2
 from logger import get_logger
 from t11_argument_parser import parse_args
 from t11_robot import Robot
 
-# Threads — Suivi de Ligne Via Capteurs IR
 from t11_threads import (
     thread_ultrasonic as t11_thread_ultrasonic,
     thread_line as t11_thread_line,
@@ -21,14 +19,12 @@ from t11_threads import (
     thread_buzzer as t11_thread_buzzer
 )
 
-# Threads — Labyrinthe
 from labyrinthe_threads import (
     thread_ultrasonic as labyrinthe_thread_ultrasonic,
     thread_drive as labyrinthe_thread_drive
 )
 
-# Threads — Suivi de Ligne Via Caméra Autonome
-import camera_line3  # Import du module complet pour lier la caméra
+import camera_line3
 
 frame_lock = threading.Lock()
 latest_frame = None
@@ -114,7 +110,7 @@ class RobotStepManager:
                                      args=(robot_instance, camera_line3.US_INTERVAL), name="US", daemon=True),
                     threading.Thread(target=camera_line3.thread_LED, args=(robot_instance, camera_line3.LED_INTERVAL),
                                      name="LED", daemon=True),
-                    threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance,), name="CAM_AUTO",
+                    threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance, self.camera), name="CAM_AUTO",
                                      daemon=True),
                     threading.Thread(
                         target=lambda: camera_line3.app.run(host="0.0.0.0", port=5002, debug=False, threaded=True,
@@ -134,8 +130,7 @@ class RobotStepManager:
             return
         self.steps[self.current_step].stop()
 
-        # TRANSITION VERS FLÈCHES : Injecter l'instance de la caméra principale
-        if new_step == "Flèches":
+        if new_step == "Camera Line":
             camera_line3.global_camera_ref = self.camera
             camera_line3.global_robot_ref = self.robot
 
@@ -150,8 +145,6 @@ class RobotStepManager:
         for step_config in self.steps.values():
             step_config.stop()
 
-
-# ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE ─────────────────────────────────
 
 def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
     global latest_frame, system_running
@@ -226,7 +219,7 @@ def index():
                 motor.innerText = data.robot_running ? "EN MARCHE" : "ARRÊTÉ";
                 motor.style.color = data.robot_running ? "#04d361" : "#fca3a3";
 
-                const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Flèches": "m4" };
+                const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Camera Line": "m4" };
                 document.querySelectorAll('.btn-group.modes button').forEach(b => b.classList.remove('active'));
                 if (modes[data.current_step]) {
                     document.getElementById(modes[data.current_step]).classList.add('active');
@@ -255,7 +248,7 @@ def index():
                 <button id="m1" onclick="sendCommand('/control/mode', '1')">Line Following</button>
                 <button id="m2" onclick="sendCommand('/control/mode', '2')">Obstacles</button>
                 <button id="m3" onclick="sendCommand('/control/mode', '3')">Labyrinthe</button>
-                <button id="m4" onclick="sendCommand('/control/mode', '4')">Flèches</button>
+                <button id="m4" onclick="sendCommand('/control/mode', '4')">Camera Line</button>
             </div>
         </div>
     </body>
@@ -267,8 +260,6 @@ def index():
 def video_feed():
     return Response(generate_global_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-
-# ── ENDPOINTS API POUR LES BOUTONS WEB ────────────────────────────────────────
 
 @app_global.route('/status', methods=['GET'])
 def get_status():
