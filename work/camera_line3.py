@@ -7,14 +7,13 @@ import cv2
 import numpy as np
 from flask import Flask, Response, render_template_string, jsonify
 
-# Imports spécifiques au matériel de votre Robot
+# Imports matériels
 from board import SCL, SDA
 import busio
 from adafruit_pca9685 import PCA9685
 
 from t11_argument_parser import parse_args
 from t11_robot import Robot
-
 from picamera2 import Picamera2
 
 
@@ -23,7 +22,7 @@ class Direction:
     BACKWARD = "backward"
 
 
-# ── PARAMÈTRES DE CONFIGURATION REGLABLES ─────────────────────────────────────
+# ── PARAMÈTRES DE CONFIGURATION RÉGLABLES ─────────────────────────────────────
 SPEED_MAX_PCT = 48
 SPEED_MIN_PCT = 37
 
@@ -32,8 +31,8 @@ MAX_STEER_DELTA = 45  # Braquage max autorisé (90 +/- 45)
 
 MIN_LINE_AREA = 300
 CTRL_INTERVAL = 0.05
-US_INTERVAL = 0.06  # Intervalle de rafraîchissement ultrason
-LED_INTERVAL = 0.1  # Intervalle de rafraîchissement des LED
+US_INTERVAL = 0.06
+LED_INTERVAL = 0.1
 
 THRESHOLD_DEADZONE = 5
 ALPHA_SMOOTHING = 0.35
@@ -59,7 +58,11 @@ telemetry = {
 
 current_encoded_frame = None
 system_running = True
+
+# Changement de nom pour éviter les collisions d'importation dans le main
 app = Flask(__name__)
+global_robot_ref = None
+global_camera_ref = None  # Référence de secours
 
 
 def get_red_mask(roi: np.ndarray) -> np.ndarray:
@@ -77,14 +80,15 @@ def get_red_mask(roi: np.ndarray) -> np.ndarray:
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     return cv2.morphologyEx(mask_roi, cv2.MORPH_OPEN, kernel)
 
+
 def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
-    """Analyse les bandes à longue distance et court-circuite le lissage en cas de crise."""
+    """Analyse les bandes à longue distance et gère la trajectoire."""
     global smoothed_angle_delta
     height, width = frame.shape[:2]
     center_x = width // 2
     output = frame.copy()
 
-    # Remontée agressive des ROIs vers le haut de l'image (Horizon)
+    # Définition des zones (ROIs)
     roi_low_top, roi_low_bot = int(height * 0.70), int(height * 0.90)
     roi_high_top, roi_high_bot = int(height * 0.20), int(height * 0.40)
 
@@ -94,7 +98,7 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
     M_low = cv2.moments(mask_low)
     M_high = cv2.moments(mask_high)
 
-    # Affichage des lignes de guidage réajustées
+    # Overlays graphiques
     cv2.line(output, (0, roi_low_top), (width, roi_low_top), (0, 140, 255), 1)
     cv2.line(output, (0, roi_high_top), (width, roi_high_top), (0, 255, 255), 1)
     cv2.line(output, (center_x, 0), (center_x, height), (255, 0, 0), 1)
@@ -136,7 +140,6 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
 
         elif pt_high is not None:
             cv2.line(output, pt_low, pt_high, (255, 0, 255), 2)
-
             dx = pt_high[0] - pt_low[0]
             dy = pt_low[1] - pt_high[1]
             angle_vector_deg = np.degrees(np.arctan2(dx, dy))
@@ -144,12 +147,10 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
             if abs(angle_vector_deg) > 20.0:
                 direction_sign = np.sign(dx) if dx != 0 else np.sign(error_low_px)
                 target_angle_delta = direction_sign * MAX_STEER_DELTA
-
-                stable_dir = f"🚨 COUPE-FILE ULTRA-ANTICIPÉ ({int(angle_vector_deg)}°)"
+                stable_dir = f"🚨 COUPE-FILE ANTICIPÉ ({int(angle_vector_deg)}°)"
                 border_color = (255, 0, 128)
                 force_low_speed = True
                 bypass_smoothing = True
-
             else:
                 midpoint_x = (pt_low[0] + pt_high[0]) / 2.0
                 error_position_px = midpoint_x - center_x
@@ -158,13 +159,12 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
 
                 if abs(error_low_px) > 15 and abs(dx) < 12:
                     target_angle_delta = (angle_from_position * 0.85) + (angle_from_direction * 0.15)
-                    stable_dir = "COMBO OVERRIDE : VERTICALE"
+                    stable_dir = "COMBO VERTICALE"
                     border_color = (255, 191, 0)
                 else:
                     target_angle_delta = (angle_from_position * WEIGHT_POSITION) + (
                                 angle_from_direction * WEIGHT_DIRECTION)
-                    stable_dir = "COMBO DICTION + POSITION"
-
+                    stable_dir = "COMBO DIRECT + POS"
         else:
             target_angle_delta = angle_base_low * 1.3
             stable_dir = "SUIVI SIMPLE BAS"
@@ -176,7 +176,7 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
         target_angle_delta = (error_high_px / center_x) * MAX_STEER_DELTA * 1.2
         stable_dir = "ACCROCHE SECU HAUT"
 
-    # ── FILTRAGE ET CONSIGNES MATÉRIELLES ──
+    # ── FILTRAGE ET CONSIGNES ──
     if line_seen == "OUI":
         if bypass_smoothing:
             smoothed_angle_delta = target_angle_delta
@@ -200,18 +200,14 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
         stable_dir = "LIGNE PERDUE"
         border_color = (0, 0, 255)
 
-    # Récupération sécurisée de l'état ultrason / arrêt d'urgence avant envoi moteur
     with robot_instance.state.lock:
         is_emergency = robot_instance.state.emergency_stop
         current_dist = getattr(robot_instance.state, 'distance_mm', 0)
-
         if is_emergency:
             calculated_speed = 0
-
         robot_instance.state.calculated_speed = calculated_speed
         robot_instance.state.calculated_angle = int(STEER_CENTER_DEG + final_angle_delta)
 
-    # Incrustation vidéo
     cv2.putText(output, f"Servo Delta: {int(final_angle_delta)}deg | Vitesse: {calculated_speed}%", (10, height - 15),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.putText(output, f"STRAT: {stable_dir}", (10, 35),
@@ -228,7 +224,6 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
     return output
 
 
-# THREADS MATÉRIELS ET SENSEURS ASYNCHRONES
 def thread_controller_camera_line(robot: Robot, interval: float) -> None:
     """Boucle matérielle principale d'actionnement de la propulsion et direction."""
     while True:
@@ -259,29 +254,22 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
 
 
 def thread_ultrasonic(robot: Robot, interval: float) -> None:
-    """Mesure continue de la distance avant et levée du drapeau d'urgence."""
     while True:
         with robot.state.lock:
             if not robot.state.running or not system_running:
                 break
-
         try:
             dist_mm = robot.ultrasonic.read_mm()
         except Exception:
-            dist_mm = 999  # Fallback si erreur matérielle d'écho
-
+            dist_mm = 999
         with robot.state.lock:
             robot.state.distance_mm = dist_mm
-            # Déclenchement arrêt d'urgence matériel
             robot.state.emergency_stop = dist_mm < 120
-
         time.sleep(interval)
 
 
 def thread_LED(robot: Robot, interval: float):
-    """Régulation dynamique de la signalisation lumineuse selon la cinématique du robot."""
     last_front_state = None
-
     while True:
         with robot.state.lock:
             if not robot.state.running or not system_running:
@@ -289,7 +277,6 @@ def thread_LED(robot: Robot, interval: float):
             emergency = robot.state.emergency_stop
             angle = robot.state.calculated_angle
 
-        # Sélection de l'état lumineux selon les angles réels de braquage calculés
         if emergency:
             target_state = 'warning'
             robot.led.warning()
@@ -310,34 +297,31 @@ def thread_LED(robot: Robot, interval: float):
             except Exception:
                 pass
             last_front_state = target_state
-
         time.sleep(interval)
 
-    try:
-        robot.front_leds.cancel_blink()
-    except Exception:
-        pass
 
-
-def thread_camera_loop(robot_instance: Robot):
-    """Boucle autonome qui lit la caméra en continu et met à jour les données"""
+def thread_camera_loop(robot_instance: Robot, camera_instance=None):
+    """Utilise directement l'instance de caméra passée en argument pour capturer les frames."""
     global system_running, current_encoded_frame
-
-    picam = Picamera2()
-    config = picam.create_video_configuration(main={"size": (640, 480)})
-    picam.configure(config)
-    picam.start()
-    time.sleep(0.1)
-
     frame_count = 0
     t0 = time.time()
 
+    time.sleep(0.2)
+
     try:
         while system_running:
-            frame = picam.capture_array()
+            if camera_instance is not None:
+                frame = camera_instance.capture_array()
+            elif global_camera_ref is not None:
+                frame = global_camera_ref.capture_array()
+            elif hasattr(robot_instance, 'camera') and robot_instance.camera is not None:
+                frame = robot_instance.camera.capture_array()
+            else:
+                time.sleep(0.05)
+                continue
+
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            # Calcul du FPS
             frame_count += 1
             elapsed = time.time() - t0
             if elapsed >= 1.0:
@@ -345,330 +329,25 @@ def thread_camera_loop(robot_instance: Robot):
                     telemetry["fps"] = round(frame_count / elapsed, 1)
                 frame_count, t0 = 0, time.time()
 
-            # Analyse l'image et met à jour les consignes moteurs immédiatement
             processed = process_frame(frame, robot_instance)
-
-            # Encode l'image traitée en JPG et la stocke pour Flask
             _, enc = cv2.imencode(".jpg", processed)
             with lock:
                 current_encoded_frame = enc.tobytes()
 
-            time.sleep(0.01)  # Petite pause pour le CPU
+            time.sleep(0.02)
     except Exception as e:
-        print(f"Erreur flux vidéo autonome: {e}")
-    finally:
-        picam.stop()
-        picam.close()
+        print(f"Erreur flux vidéo autonome camera_line3: {e}")
+
 
 def generate_frames(robot_instance: Robot):
-    """Envoie simplement à Flask la dernière image générée par le thread autonome."""
     global system_running, current_encoded_frame
     while system_running:
         if current_encoded_frame is not None:
             yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + current_encoded_frame + b"\r\n")
-        time.sleep(0.04)
+        time.sleep(0.05)
 
-HTML_INTERFACE = """<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Team C — Cockpit 2026</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0d1117;
-  --surface:#161b22;
-  --card:#1c2128;
-  --border:rgba(255,255,255,0.08);
-  --border-em:rgba(255,255,255,0.15);
-  --text:#e6edf3;
-  --muted:#8b949e;
-  --hint:#484f58;
-  --mono:'SF Mono','Fira Code','Cascadia Code',monospace;
-  --c-blue:#58a6ff;
-  --c-blue-bg:rgba(88,166,255,0.1);
-  --c-green:#3fb950;
-  --c-green-bg:rgba(63,185,80,0.1);
-  --c-red:#f85149;
-  --c-red-bg:rgba(248,81,73,0.1);
-  --c-amber:#d29922;
-  --c-amber-bg:rgba(210,153,34,0.1);
-  --c-purple:#bc8cff;
-  --radius:8px;
-  --radius-lg:12px;
-}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:20px 24px;min-height:100vh}
 
-/* ─ HEADER ─ */
-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:0.5px solid var(--border)}
-.logo{width:34px;height:34px;border-radius:var(--radius);background:var(--c-blue-bg);border:0.5px solid var(--c-blue);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.logo svg{width:18px;height:18px;stroke:var(--c-blue);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.header-text h1{font-size:15px;font-weight:600;color:var(--text);letter-spacing:0.3px}
-.header-text p{font-size:12px;color:var(--muted);margin-top:2px}
-#sys-badge{margin-left:auto;font-size:11px;font-weight:600;font-family:var(--mono);padding:4px 12px;border-radius:20px;letter-spacing:0.5px;text-transform:uppercase;transition:all .2s}
-.badge-ok{background:var(--c-green-bg);color:var(--c-green);border:0.5px solid rgba(63,185,80,0.3)}
-.badge-warn{background:var(--c-amber-bg);color:var(--c-amber);border:0.5px solid rgba(210,153,34,0.3)}
-.badge-err{background:var(--c-red-bg);color:var(--c-red);border:0.5px solid rgba(248,81,73,0.3);animation:pulse 1s ease-in-out infinite alternate}
-@keyframes pulse{from{box-shadow:none}to{box-shadow:0 0 12px rgba(248,81,73,0.35)}}
-
-/* ─ LAYOUT ─ */
-.layout{display:grid;grid-template-columns:1fr 290px;gap:16px;align-items:start;max-width:1060px}
-@media(max-width:700px){.layout{grid-template-columns:1fr}}
-
-/* ─ VIDEO ─ */
-.video-card{border-radius:var(--radius-lg);overflow:hidden;border:0.5px solid var(--border);background:#000;position:relative}
-.video-card img{display:block;width:100%}
-.video-hud{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none}
-.hud-pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:20px;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);color:#fff;border:0.5px solid rgba(255,255,255,0.12)}
-.video-footer{padding:9px 13px;display:flex;align-items:center;gap:8px;border-top:0.5px solid var(--border);background:var(--card)}
-.line-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:background .2s}
-.line-dot.on{background:var(--c-green)}
-.line-dot.off{background:var(--c-red)}
-#line-status-text{font-size:12px;color:var(--muted);font-family:var(--mono)}
-.strat-bar{position:absolute;bottom:0;left:0;right:0;padding:9px 13px;background:linear-gradient(transparent,rgba(0,0,0,0.75));font-family:var(--mono);font-size:12px;color:#fff;pointer-events:none}
-
-/* ─ PANEL ─ */
-.panel{display:flex;flex-direction:column;gap:12px}
-
-.card{background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
-.card-header{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:0.5px solid var(--border);background:var(--surface)}
-.card-header .icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center}
-.card-header .icon svg{width:14px;height:14px;stroke:var(--muted);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.card-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.7px}
-
-.metric{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border-bottom:0.5px solid var(--border)}
-.metric:last-child{border-bottom:none}
-.metric-label{font-size:12px;color:var(--muted)}
-.mval{font-family:var(--mono);font-size:13px;font-weight:600}
-.mval.blue{color:var(--c-blue)}
-.mval.green{color:var(--c-green)}
-.mval.red{color:var(--c-red)}
-.mval.amber{color:var(--c-amber)}
-.mval.white{color:var(--text)}
-
-/* ─ GAUGE ─ */
-.gauge-wrap{padding:10px 13px}
-.gauge-meta{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
-.gauge-meta span:first-child{color:var(--muted)}
-.gauge-meta span:last-child{font-family:var(--mono);font-weight:600;color:var(--text)}
-.gauge-track{height:5px;border-radius:3px;background:rgba(255,255,255,0.06);overflow:hidden}
-.gauge-fill{height:100%;border-radius:3px;transition:width .18s ease}
-.gauge-fill.g-blue{background:var(--c-blue)}
-.gauge-fill.g-green(background:var(--c-green)}
-.gauge-fill.g-red{background:var(--c-red)}
-.gauge-fill.g-amber{background:var(--c-amber)}
-
-.steer-track{height:5px;border-radius:3px;background:rgba(255,255,255,0.06);position:relative;overflow:hidden}
-.steer-center-line{position:absolute;left:50%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.2)}
-.steer-fill{height:100%;transition:all .18s ease;position:absolute}
-
-/* ─ ESTOP ─ */
-.estop-pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;font-family:var(--mono);padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px}
-.ep-ok{background:var(--c-green-bg);color:var(--c-green);border:0.5px solid rgba(63,185,80,0.3)}
-.ep-ko{background:var(--c-red-bg);color:var(--c-red);border:0.5px solid rgba(248,81,73,0.3)}
-.ep-dot{width:5px;height:5px;border-radius:50%}
-.ep-dot.dok{background:var(--c-green)}
-.ep-dot.dko{background:var(--c-red)}
-
-/* ─ STRATEGY ─ */
-.strat-card{background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:13px}
-.strat-label{font-size:10px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
-#strat-value{font-family:var(--mono);font-size:13px;font-weight:600;line-height:1.5;transition:color .2s}
-
-/* ─ SLOTS MODULAIRES SUPPLÉMENTAIRES ─ */
-/* Ajoutez ici de nouveaux composants plus tard. */
-/* Ex: .module-map, .module-imu, .module-log  */
-</style>
-
-<header>
-  <div class="logo">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
-  </div>
-  <div class="header-text">
-    <h1>Cockpit de Télémétrie — Team C</h1>
-    <p>Robot autonome &middot; suivi de ligne &middot; 2026</p>
-  </div>
-  <div id="sys-badge" class="badge-ok">Nominal</div>
-</header>
-
-<div class="layout">
-
-  <div class="video-card">
-    <img src="/video_feed" alt="Flux caméra du robot">
-    <div class="video-hud">
-      <div class="hud-pill" id="fps-hud">— Hz</div>
-      <div class="hud-pill" id="dist-hud">— mm</div>
-    </div>
-    <div class="strat-bar" id="strat-hud">RECHERCHE...</div>
-  </div>
-  <div style="background:var(--card);border:0.5px solid var(--border);border-bottom-left-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg);padding:9px 13px;display:flex;align-items:center;gap:8px;margin-top:-1px">
-    <div class="line-dot off" id="line-dot"></div>
-    <span id="line-status-text" style="font-size:12px;color:var(--muted);font-family:var(--mono)">Ligne non détectée</span>
-  </div>
-
-  <div class="panel">
-
-    <div class="card">
-      <div class="card-header">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        </div>
-        <span class="card-title">Cinématique</span>
-      </div>
-      <div class="gauge-wrap">
-        <div class="gauge-meta"><span>Régime moteur</span><span id="speed-label">0 %</span></div>
-        <div class="gauge-track"><div class="gauge-fill g-blue" id="speed-bar" style="width:0%"></div></div>
-      </div>
-      <div class="gauge-wrap" style="padding-top:0">
-        <div class="gauge-meta"><span>Direction servo</span><span id="steer-label">0°</span></div>
-        <div class="steer-track">
-          <div class="steer-center-line"></div>
-          <div class="steer-fill" id="steer-fill"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        </div>
-        <span class="card-title">Sécurité</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">Télémétrie ultrason</span>
-        <span class="mval blue" id="dist-val">— mm</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">Arrêt d'urgence</span>
-        <div class="estop-pill ep-ok" id="estop">
-          <div class="ep-dot dok" id="ep-dot"></div>
-          <span id="estop-text">Nominal</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </div>
-        <span class="card-title">Vision</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">Cadence d'images</span>
-        <span class="mval white" id="fps-val">— Hz</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">Correction angle</span>
-        <span class="mval amber" id="err-val">0°</span>
-      </div>
-    </div>
-
-    <div class="strat-card">
-      <div class="strat-label">Stratégie active</div>
-      <div id="strat-value">RECHERCHE LIGNE...</div>
-    </div>
-
-  </div>
-</div>
-
-<script>
-const SPEED_MAX = 40;
-const STEER_CENTER = 90;
-const MAX_DELTA = 45;
-
-async function tick() {
-  let d;
-  try { d = await fetch('/data').then(r => r.json()); }
-  catch(e) { return; }
-  if (d.fps === undefined) return;
-
-  // FPS
-  document.getElementById('fps-val').textContent = d.fps + ' Hz';
-  document.getElementById('fps-hud').textContent = d.fps + ' Hz';
-
-  // Distance
-  const dist = d.distance_mm;
-  const distEl = document.getElementById('dist-val');
-  distEl.textContent = dist + ' mm';
-  distEl.className = 'mval ' + (dist < 150 ? 'red' : dist < 300 ? 'amber' : 'blue');
-  document.getElementById('dist-hud').textContent = dist + ' mm';
-
-  // Speed
-  const spd = d.speed_pct;
-  document.getElementById('speed-label').textContent = spd + ' %';
-  document.getElementById('speed-bar').style.width = Math.round((spd / SPEED_MAX) * 100) + '%';
-  const gc = spd > 35 ? 'g-green' : spd > 20 ? 'g-blue' : 'g-amber';
-  document.getElementById('speed-bar').className = 'gauge-fill ' + gc;
-
-  // Steer
-  const delta = d.error_px;
-  document.getElementById('steer-label').textContent = (delta >= 0 ? '+' : '') + delta + '°';
-  document.getElementById('err-val').textContent = (delta >= 0 ? '+' : '') + delta + '°';
-  const sf = document.getElementById('steer-fill');
-  const pct = Math.abs(delta) / MAX_DELTA * 50;
-  if (delta > 0) {
-    sf.style.left = '50%'; sf.style.right = 'auto';
-    sf.style.width = pct + '%';
-    sf.style.background = 'var(--c-blue)';
-  } else if (delta < 0) {
-    sf.style.right = '50%'; sf.style.left = 'auto';
-    sf.style.width = pct + '%';
-    sf.style.background = 'var(--c-amber)';
-  } else {
-    sf.style.width = '0';
-  }
-
-  // Emergency stop
-  const em = d.emergency;
-  const estopEl = document.getElementById('estop');
-  const dotEl = document.getElementById('ep-dot');
-  const etxtEl = document.getElementById('estop-text');
-  if (em) {
-    estopEl.className = 'estop-pill ep-ko';
-    dotEl.className = 'ep-dot dko';
-    etxtEl.textContent = 'ARRÊT URGENCE';
-  } else {
-    estopEl.className = 'estop-pill ep-ok';
-    dotEl.className = 'ep-dot dok';
-    etxtEl.textContent = 'Nominal';
-  }
-
-  // Line detection
-  const seen = d.line_seen === 'OUI';
-  const dot = document.getElementById('line-dot');
-  dot.className = 'line-dot ' + (seen ? 'on' : 'off');
-  document.getElementById('line-status-text').textContent =
-    seen ? ('Ligne détectée — ' + (delta > 3 ? 'correction droite' : delta < -3 ? 'correction gauche' : 'axe centré'))
-         : 'Ligne non détectée';
-
-  // Strategy
-  const strat = d.stable_dir || '—';
-  const sv = document.getElementById('strat-value');
-  sv.textContent = strat;
-  sv.style.color = em ? 'var(--c-red)'
-    : strat.includes('URGENCE') ? 'var(--c-red)'
-    : strat.includes('OVERRIDE') || strat.includes('COUPE') ? 'var(--c-amber)'
-    : strat.includes('COMBO') ? 'var(--c-blue)'
-    : 'var(--text)';
-  document.getElementById('strat-hud').textContent = strat;
-
-  // System badge
-  const badge = document.getElementById('sys-badge');
-  if (em) {
-    badge.className = 'badge-err'; badge.textContent = 'URGENCE';
-  } else if (!seen) {
-    badge.className = 'badge-warn'; badge.textContent = 'Ligne perdue';
-  } else {
-    badge.className = 'badge-ok'; badge.textContent = 'Nominal';
-  }
-}
-
-setInterval(tick, 80);
-</script>
-</html>"""
+HTML_INTERFACE = """..."""
 
 
 @app.route("/")
@@ -680,41 +359,40 @@ def index():
 def video_feed():
     return Response(generate_frames(global_robot_ref), mimetype="multipart/x-mixed-replace; boundary=frame")
 
+
 @app.route("/data")
 def get_data():
     with lock:
         return jsonify(telemetry)
 
 
-# POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION
 if __name__ == "__main__":
     args = parse_args()
-
     subprocess.run(["sudo", "pkill", "-f", "rpicam"], stderr=subprocess.DEVNULL)
     time.sleep(0.2)
 
     robot = Robot(args)
     robot.init()
+    if not hasattr(robot.state, 'calculated_angle'):
+        robot.state.calculated_angle = STEER_CENTER_DEG
 
-    # Orientation physique initiale de l'axe vertical caméra
     robot.head.set_angle_motor(2, 60)
 
-    with robot.state.lock:
-        robot.state.calculated_speed = 0
-        robot.state.calculated_angle = STEER_CENTER_DEG
-        robot.state.distance_mm = 999
-        robot.state.emergency_stop = False
+    # Mode Standalone : On crée l'unique instance caméra ici
+    picam = Picamera2()
+    picam.configure(picam.create_video_configuration(main={"size": (640, 480)}))
+    picam.start()
+    global_camera_ref = picam
 
     global_robot_ref = robot
 
-    # Démarrage synchrone de tous les threads
     threads = [
         threading.Thread(target=thread_controller_camera_line, args=(robot, CTRL_INTERVAL), name="CTRL", daemon=True),
-        threading.Thread(target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
+        threading.Thread(target=target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
         threading.Thread(target=thread_LED, args=(robot, LED_INTERVAL), name="LED", daemon=True),
-        threading.Thread(target=thread_camera_loop, args=(robot,), name="CAM_AUTO", daemon=True),
+        threading.Thread(target=thread_camera_loop, args=(robot, picam), name="CAM_AUTO", daemon=True),
         threading.Thread(
-            target=lambda: app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False),
+            target=lambda: app.run(host="0.0.0.0", port=5002, debug=False, threaded=True, use_reloader=False),
             name="WEB", daemon=True)
     ]
 
@@ -724,17 +402,10 @@ if __name__ == "__main__":
     try:
         while True:
             time.sleep(0.5)
-
     except KeyboardInterrupt:
         pass
-
     finally:
         system_running = False
-
-        with robot.state.lock:
-            robot.state.running = False
-
-        for t in threads:
-            t.join(timeout=1.0)
-
+        picam.stop()
+        picam.close()
         robot.shutdown()

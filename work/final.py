@@ -28,48 +28,33 @@ from labyrinthe_threads import (
 )
 
 # Threads — Suivi de Ligne Via Caméra Autonome
-from camera_line3 import (
-    thread_controller_camera_line as thread_camera_line,
-    CTRL_INTERVAL,
-    thread_ultrasonic as thread_camera_line_US,
-    US_INTERVAL,
-    thread_LED as thread_camera_line_LED,
-    LED_INTERVAL,
-    thread_camera_loop,
-    app as app_camera_line
-)
+import camera_line3  # Import du module complet pour lier la caméra
 
 frame_lock = threading.Lock()
 latest_frame = None
 system_running = True
 target_step = "Line following"
 
-# Configuration du serveur Flask global pour la supervision (Port 5001)
 app_global = Flask(__name__)
 
-# Références globales requises pour les routes Flask
 robot = None
 step_manager = None
 log = None
 
 
 class StepConfig:
-    """Structure de données pour configurer chaque étape du robot."""
-
     def __init__(self, camera_angle: int, thread_factory: Callable[[], List[threading.Thread]]):
         self.camera_angle = camera_angle
         self.thread_factory = thread_factory
         self.active_threads: List[threading.Thread] = []
 
     def start(self, robot_instance: Robot) -> None:
-        """oriente la caméra, génère les threads et les lance."""
         robot_instance.head.set_angle_motor(2, self.camera_angle)
         self.active_threads = self.thread_factory()
         for thread in self.active_threads:
             thread.start()
 
     def stop(self) -> None:
-        """Attend la fin des threads de cette étape."""
         for thread in self.active_threads:
             if thread.is_alive():
                 thread.join(timeout=0.5)
@@ -77,8 +62,6 @@ class StepConfig:
 
 
 class RobotStepManager:
-    """Gère les transitions d'états du robot"""
-
     def __init__(self, robot_instance: Robot, camera_instance: Picamera2, args_instance):
         self.robot = robot_instance
         self.camera = camera_instance
@@ -125,16 +108,17 @@ class RobotStepManager:
             "Flèches": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
-                    threading.Thread(target=thread_camera_line, args=(robot_instance, CTRL_INTERVAL), name="CTRL",
+                    threading.Thread(target=camera_line3.thread_controller_camera_line,
+                                     args=(robot_instance, camera_line3.CTRL_INTERVAL), name="CTRL", daemon=True),
+                    threading.Thread(target=camera_line3.thread_ultrasonic,
+                                     args=(robot_instance, camera_line3.US_INTERVAL), name="US", daemon=True),
+                    threading.Thread(target=camera_line3.thread_LED, args=(robot_instance, camera_line3.LED_INTERVAL),
+                                     name="LED", daemon=True),
+                    threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance,), name="CAM_AUTO",
                                      daemon=True),
-                    threading.Thread(target=thread_camera_line_US, args=(robot_instance, US_INTERVAL), name="US",
-                                     daemon=True),
-                    threading.Thread(target=thread_camera_line_LED, args=(robot_instance, LED_INTERVAL), name="LED",
-                                     daemon=True),
-                    threading.Thread(target=thread_camera_loop, args=(robot_instance,), name="CAM_AUTO", daemon=True),
                     threading.Thread(
-                        target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False, threaded=True,
-                                                           use_reloader=False),
+                        target=lambda: camera_line3.app.run(host="0.0.0.0", port=5002, debug=False, threaded=True,
+                                                            use_reloader=False),
                         name="WEB_CAM_LINE", daemon=True
                     )
                 ]
@@ -149,6 +133,12 @@ class RobotStepManager:
         if new_step == self.current_step or new_step not in self.steps:
             return
         self.steps[self.current_step].stop()
+
+        # TRANSITION VERS FLÈCHES : Injecter l'instance de la caméra principale
+        if new_step == "Flèches":
+            camera_line3.global_camera_ref = self.camera
+            camera_line3.global_robot_ref = self.robot
+
         self.current_step = new_step
         self.steps[self.current_step].start(self.robot)
 
@@ -200,28 +190,21 @@ def index():
             body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f11; color: #e1e1e6; margin: 0; padding: 20px; display: flex; justify-content: center; }
             .container { width: 100%; max-width: 540px; background: #17171a; padding: 20px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #242429; }
             h1 { color: #04d361; font-size: 1.5em; margin-top: 0; margin-bottom: 15px; letter-spacing: 0.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-
-            /* Taille vidéo réduite et optimisée */
             .video-box { width: 100%; max-width: 480px; margin: 0 auto 15px auto; overflow: hidden; border-radius: 8px; border: 2px solid #242429; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); font-size: 0; }
             img { width: 100%; height: auto; aspect-ratio: 4 / 3; background: #000; }
-
             .status-panel { background: #111112; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #202024; display: flex; justify-content: space-around; font-size: 0.9em; }
             .status-item { display: flex; flex-direction: column; gap: 4px; }
             .status-label { font-size: 0.75em; color: #7c7c8a; text-transform: uppercase; letter-spacing: 0.5px; }
             .status-val { font-weight: bold; font-size: 1.05em; color: #fff; }
-
             .section-title { font-size: 0.8em; color: #7c7c8a; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px 0; text-align: left; font-weight: bold; }
             .btn-group { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
-
             button { background: #202024; color: #e1e1e6; border: 1px solid #2e2e35; padding: 14px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
             button:hover { background: #29292e; border-color: #04d361; }
             button:active { transform: scale(0.97); }
-
             button.btn-start { background: #12361b; border-color: #1e592c; color: #87f5a9; grid-column: span 1; }
             button.btn-start:hover { background: #1b4d26; }
             button.btn-stop { background: #4a1919; border-color: #732727; color: #fca3a3; grid-column: span 1; }
             button.btn-stop:hover { background: #612222; }
-
             .btn-group.modes button { text-align: center; }
             .btn-group.modes button.active { border-color: #04d361; background: #242429; color: #04d361; box-shadow: 0 0 8px rgba(4,211,97,0.2); }
         </style>
@@ -233,22 +216,18 @@ def index():
                 .then(data => updateUI(data))
                 .catch(err => console.error('Erreur:', err));
             }
-
             function updateUI(data) {
                 document.getElementById('current-mode-status').innerText = data.current_step;
-
                 const motor = document.getElementById('motor-status');
                 motor.innerText = data.robot_running ? "EN MARCHE" : "ARRÊTÉ";
                 motor.style.color = data.robot_running ? "#04d361" : "#fca3a3";
 
-                // Gestion de la classe active sur les boutons de mode
                 const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Flèches": "m4" };
                 document.querySelectorAll('.btn-group.modes button').forEach(b => b.classList.remove('active'));
                 if (modes[data.current_step]) {
                     document.getElementById(modes[data.current_step]).classList.add('active');
                 }
             }
-
             setInterval(() => {
                 fetch('/status').then(res => res.json()).then(data => updateUI(data)).catch(err => console.error(err));
             }, 1000);
@@ -257,28 +236,16 @@ def index():
     <body>
         <div class="container">
             <h1>Cockpit Robot — Team C</h1>
-
-            <div class="video-box">
-                <img src="/video_feed" alt="Flux live">
-            </div>
-
+            <div class="video-box"><img src="/video_feed" alt="Flux live"></div>
             <div class="status-panel">
-                <div class="status-item">
-                    <span class="status-label">Moteurs (running)</span>
-                    <span id="motor-status" class="status-val">--</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Mode Actif</span>
-                    <span id="current-mode-status" class="status-val">--</span>
-                </div>
+                <div class="status-item"><span class="status-label">Moteurs (running)</span><span id="motor-status" class="status-val">--</span></div>
+                <div class="status-item"><span class="status-label">Mode Actif</span><span id="current-mode-status" class="status-val">--</span></div>
             </div>
-
             <div class="section-title">Alimentation Principale</div>
             <div class="btn-group">
                 <button class="btn-start" onclick="sendCommand('/control/start')">▶ START (running=true)</button>
                 <button class="btn-stop" onclick="sendCommand('/control/stop')">🛑 STOP (running=false)</button>
             </div>
-
             <div class="section-title">Changement de Mode Manuel</div>
             <div class="btn-group modes">
                 <button id="m1" onclick="sendCommand('/control/mode', '1')">Line Following</button>
@@ -311,8 +278,8 @@ def get_status():
 def web_start():
     global robot, log
     with robot.state.lock:
-        robot.state.running = True  # Relance la boucle globale
-        robot.state.emergency_stop = False  # Réarme le flag matériel si existant
+        robot.state.running = True
+        robot.state.emergency_stop = False
     log.info("🌐 WEB : Réactivation complète du robot -> robot.state.running = True")
     return jsonify({"status": "success", "robot_running": True, "current_step": step_manager.current_step})
 
@@ -321,8 +288,8 @@ def web_start():
 def web_stop():
     global robot, log
     with robot.state.lock:
-        robot.state.running = False  # Coupe la boucle d'exécution du robot
-    robot.motor.stop()  # Arrêt immédiat de sécurité
+        robot.state.running = False
+    robot.motor.stop()
     log.warning("🛑 WEB : Coupure immédiate du robot -> robot.state.running = False")
     return jsonify({"status": "success", "robot_running": False, "current_step": step_manager.current_step})
 
@@ -339,8 +306,6 @@ def web_change_mode():
     return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
 
-# ── POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION ──────────────────────────────────────
-
 if __name__ == "__main__":
     log = get_logger("MAIN")
     log.info("╔══════════════════════════════════════════════╗")
@@ -350,6 +315,9 @@ if __name__ == "__main__":
     args = parse_args()
     robot = Robot(args)
     robot.init()
+
+    if not hasattr(robot.state, 'calculated_angle'):
+        robot.state.calculated_angle = 90
 
     camera = Picamera2()
     camera.configure(camera.create_video_configuration(main={"size": (640, 480)}))
