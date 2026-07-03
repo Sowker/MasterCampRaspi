@@ -83,7 +83,9 @@ def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
                 break
 
         scan = scan_cm() # scanning and putting the result in the global scan variable
-        if MODE == MODE_AVOID_LINE: return
+        if MODE == MODE_AVOID_LINE:
+            robot.head.set_angle_motor(2, 60)  # looking downward to see the blue square
+            return
 
 def thread_line_detect_avoid(robot: Robot, interval: float) -> None:
     """
