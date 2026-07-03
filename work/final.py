@@ -85,7 +85,6 @@ class RobotStepManager:
         self.args = args_instance
         self.current_step: str = "Line following"
 
-        # Mapping mis à jour pour correspondre à votre nouveau cycle manuel
         self.step_mapping = {
             "1": "Line following",
             "2": "Obstacles",
@@ -93,36 +92,31 @@ class RobotStepManager:
             "4": "Flèches"
         }
 
-        # Définition des stratégies de chaque étape
         self.steps: Dict[str, StepConfig] = {
             "Line following": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
                     threading.Thread(target=t11_thread_ultrasonic, args=(robot_instance, args_instance.sensor_interval),
-                                     name="US_IR",
-                                     daemon=True),
+                                     name="US_IR", daemon=True),
                     threading.Thread(target=t11_thread_line, args=(robot_instance, args_instance.sensor_interval),
-                                     name="LINE_IR",
-                                     daemon=True),
+                                     name="LINE_IR", daemon=True),
                     threading.Thread(target=t11_thread_LED, args=(robot_instance, args_instance.sensor_interval),
-                                     name="LED_IR",
-                                     daemon=True),
+                                     name="LED_IR", daemon=True),
                     threading.Thread(target=t11_thread_controller, args=(robot_instance, args_instance.ctrl_interval),
-                                     name="CTRL_IR",
-                                     daemon=True),
+                                     name="CTRL_IR", daemon=True),
                     threading.Thread(target=t11_thread_buzzer, args=(robot_instance,), name="BUZZER", daemon=True),
                 ]
             ),
             "Obstacles": StepConfig(
                 camera_angle=90,
-                thread_factory=lambda: []  # Ajoutez vos threads spécifiques aux Obstacles ici si nécessaire
+                thread_factory=lambda: []
             ),
             "Labyrinthe": StepConfig(
                 camera_angle=110,
                 thread_factory=lambda: [
                     threading.Thread(target=labyrinthe_thread_ultrasonic,
-                                     args=(robot_instance, args_instance.sensor_interval),
-                                     name="US_Labyrinthe", daemon=True),
+                                     args=(robot_instance, args_instance.sensor_interval), name="US_Labyrinthe",
+                                     daemon=True),
                     threading.Thread(target=labyrinthe_thread_drive,
                                      args=(robot_instance, args_instance.sensor_interval, self.camera),
                                      name="Camera_Labyrinthe", daemon=True)
@@ -148,12 +142,10 @@ class RobotStepManager:
         }
 
     def initialize(self) -> None:
-        """Lance l'étape initiale par défaut."""
         if self.current_step in self.steps:
             self.steps[self.current_step].start(self.robot)
 
     def transition_to(self, new_step: str) -> None:
-        """Arrête proprement l'ancienne étape et bascule sur la nouvelle."""
         if new_step == self.current_step or new_step not in self.steps:
             return
         self.steps[self.current_step].stop()
@@ -161,21 +153,18 @@ class RobotStepManager:
         self.steps[self.current_step].start(self.robot)
 
     def shutdown_all(self) -> None:
-        """Force l'arrêt de tous les gestionnaires d'étapes."""
         for step_config in self.steps.values():
             step_config.stop()
 
 
-# ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE (SANS DÉTECTION) ────────────────
+# ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE ─────────────────────────────────
 
 def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
-    """Met à jour en tâche de fond l'image brute de la caméra (supervision pure)."""
     global latest_frame, system_running
     while system_running:
         try:
             frame = camera_instance.capture_array()
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
             with frame_lock:
                 latest_frame = frame_bgr.copy()
         except Exception:
@@ -184,7 +173,6 @@ def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
 
 
 def generate_global_frames():
-    """Générateur de flux MJPEG pour Flask."""
     global latest_frame, system_running
     while system_running:
         with frame_lock:
@@ -202,7 +190,6 @@ def generate_global_frames():
 
 @app_global.route('/')
 def index():
-    """Interface HTML épurée avec les nouveaux boutons du circuit."""
     return render_template_string("""
     <!DOCTYPE html>
     <html>
@@ -237,43 +224,42 @@ def index():
                 fetch(url, { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
-                    if(data.status === 'success') {
-                        document.getElementById('current-mode-status').innerText = data.current_step;
-                        document.getElementById('motor-status').innerText = data.emergency_stop ? "STOPPÉ" : "ACTIF";
-                        document.getElementById('motor-status').style.color = data.emergency_stop ? "#ef9a9a" : "#04d361";
-                    }
+                    updateUI(data);
                 })
                 .catch(err => console.error('Erreur:', err));
+            }
+
+            function updateUI(data) {
+                document.getElementById('current-mode-status').innerText = data.current_step;
+                document.getElementById('motor-status').innerText = data.robot_running ? "ACTIF" : "ARRÊTÉ (running=false)";
+                document.getElementById('motor-status').style.color = data.robot_running ? "#04d361" : "#ef9a9a";
             }
 
             setInterval(() => {
                 fetch('/status')
                 .then(res => res.json())
-                .then(data => {
-                    document.getElementById('current-mode-status').innerText = data.current_step;
-                    document.getElementById('motor-status').innerText = data.emergency_stop ? "STOPPÉ" : "ACTIF";
-                    document.getElementById('motor-status').style.color = data.emergency_stop ? "#ef9a9a" : "#04d361";
-                });
+                .then(data => updateUI(data))
+                .catch(err => console.error(err));
             }, 1000);
         </script>
     </head>
     <body>
         <div class="container">
-            <h1>Cockpit de Contrôle Manuel — Team C</h1>
+            <h1>Cockpit de Contrôle — Team C</h1>
 
             <div class="video-box">
                 <img src="/video_feed" alt="Flux vidéo live">
             </div>
 
             <div class="status-panel">
-                <div>État Moteurs: <span id="motor-status" class="status-val">--</span></div>
+                <div>Statut Global Robot: <span id="motor-status" class="status-val">--</span></div>
                 <div>Mode Actif: <span id="current-mode-status" class="status-val">--</span></div>
             </div>
 
             <div class="section-title">Commandes Générales</div>
             <div class="btn-group">
-                <button class="btn-start" onclick="sendCommand('/control/start')">START</button>
-                <button class="btn-stop" onclick="sendCommand('/control/stop')">STOP</button>
+                <button class="btn-start" onclick="sendCommand('/control/start')">START (running=true)</button>
+                <button class="btn-stop" onclick="sendCommand('/control/stop')">STOP (running=false)</button>
             </div>
 
             <div class="section-title">Sélection du Mode (Circuit)</div>
@@ -300,7 +286,7 @@ def video_feed():
 def get_status():
     return jsonify({
         "current_step": step_manager.current_step if step_manager else "Unknown",
-        "emergency_stop": robot.state.emergency_stop if robot else True
+        "robot_running": robot.state.running if robot else False
     })
 
 
@@ -308,19 +294,20 @@ def get_status():
 def web_start():
     global robot, log
     with robot.state.lock:
+        robot.state.running = True
         robot.state.emergency_stop = False
-    log.info("🌐 WEB : Réarmement des moteurs (START)")
-    return jsonify({"status": "success", "emergency_stop": False, "current_step": step_manager.current_step})
+    log.info("🌐 WEB : robot.state.running = True")
+    return jsonify({"status": "success", "robot_running": True, "current_step": step_manager.current_step})
 
 
 @app_global.route('/control/stop', methods=['POST'])
 def web_stop():
     global robot, log
     with robot.state.lock:
-        robot.state.emergency_stop = True
+        robot.state.running = False
     robot.motor.stop()
-    log.warning("🛑 WEB : Arrêt immédiat (STOP)")
-    return jsonify({"status": "success", "emergency_stop": True, "current_step": step_manager.current_step})
+    log.warning("🛑 WEB : robot.state.running = False (Moteurs coupés)")
+    return jsonify({"status": "success", "robot_running": False, "current_step": step_manager.current_step})
 
 
 @app_global.route('/control/mode', methods=['POST'])
@@ -330,8 +317,8 @@ def web_change_mode():
     if mode_id in step_manager.step_mapping:
         next_step = step_manager.step_mapping[mode_id]
         target_step = next_step
-        log.info(f"🔄 WEB : Transition manuelle demandée -> Mode : '{next_step}'")
-        return jsonify({"status": "success", "emergency_stop": robot.state.emergency_stop, "current_step": next_step})
+        log.info(f"🔄 WEB : Transition manuelle -> Mode : '{next_step}'")
+        return jsonify({"status": "success", "robot_running": robot.state.running, "current_step": next_step})
     return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
 
@@ -343,21 +330,17 @@ if __name__ == "__main__":
     log.info("║  Robot Line Follower — Team C — SE 2026      ║")
     log.info("╚══════════════════════════════════════════════╝")
 
-    # Initialisation globale du système matériel
     args = parse_args()
     robot = Robot(args)
     robot.init()
 
-    # Instance unique de la caméra partagée
     camera = Picamera2()
     camera.configure(camera.create_video_configuration(main={"size": (640, 480)}))
     camera.start()
 
-    # Instanciation de la machine à états
     step_manager = RobotStepManager(robot, camera, args)
     step_manager.initialize()
 
-    # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
     global_threads = [
         threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
         threading.Thread(
@@ -369,10 +352,11 @@ if __name__ == "__main__":
     for gt in global_threads:
         gt.start()
 
-    log.info("📡 Serveur global disponible sur http://localhost:5001")
+    log.info("📡 Serveur de contrôle actif sur http://localhost:5001")
 
     try:
         while True:
+            # Gestion des changements d'états demandés par la page web
             if step_manager.current_step != target_step:
                 log.info(f"Transition vers l'étape : {target_step}")
                 step_manager.transition_to(target_step)
@@ -380,21 +364,17 @@ if __name__ == "__main__":
             time.sleep(0.1)
 
     except KeyboardInterrupt:
-        log.warning("Interruption utilisateur détectée (Ctrl+C).")
+        log.warning("Interruption détectée.")
 
     finally:
-        log.info("Arrêt global du robot et nettoyage des ressources...")
+        log.info("Arrêt global du robot...")
         system_running = False
-
         with robot.state.lock:
             robot.state.running = False
         step_manager.shutdown_all()
-
         try:
             camera.stop()
             camera.close()
         except Exception:
             pass
-
         robot.shutdown()
-        log.info("Système correctement arrêté.")
