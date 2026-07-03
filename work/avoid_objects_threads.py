@@ -245,11 +245,10 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
             sleep_time = 2.5
         elif obj_angle <= 27:
             print("object mid")
-            print("prout")
             sleep_time = 2
         else:
             print("object far")
-            sleep_time = 1.5
+            sleep_time = 1
         # sleep_time = 0.1 + 0.1 * (SCAN_ANGLE/2 - obj_angle)
         # sleep_time = 2 * (SCAN_ANGLE/2 - obj_angle)
         # sleep_time = 2
