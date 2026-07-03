@@ -52,16 +52,7 @@ PIN_LINE_RIGHT = 22
 
 class CircleTracker:
     """
-    Barrette de 3 capteurs infrarouges optimisée pour rester dans un cercle.
-
-    Logique :
-    - Capteur DROIT seul → Tourner DOUX à gauche (ligne à droite)
-    - Capteur DROIT + MILIEU → Tourner FORT à gauche (trop à droite)
-    - Capteur MILIEU seul → Tout droit (ligne bien centrée)
-    - Capteur GAUCHE seul → Tourner DOUX à droite (ligne à gauche)
-    - Capteur GAUCHE + MILIEU → Tourner FORT à droite (trop à gauche)
-    - Tous les capteurs → Ambiguïté
-    - Aucun capteur → Perdu au centre du cercle
+    Barrette de 3 capteurs infrarouges
     """
 
     TRUTH_TABLE = {
