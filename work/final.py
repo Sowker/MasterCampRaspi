@@ -142,7 +142,7 @@ class RobotStepManager:
                 ]
             ),
             "Obstacles": StepConfig(
-                camera_angle=60,
+                camera_angle=90,
                 thread_factory=lambda: [
                     threading.Thread(target=thread_ultrasonic_scanning,
                                      args=(robot_instance, args_instance.sensor_interval),
