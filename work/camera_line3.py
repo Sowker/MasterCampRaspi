@@ -232,14 +232,18 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
 
 
 def thread_controller_camera_line(robot: Robot, interval: float) -> None:
-    """Boucle matérielle principale. Lit local_control au lieu de robot.state."""
+    """Boucle matérielle principale. Utilise local_control et gère l'attente active."""
     while True:
         with robot.state.lock:
-            if not robot.state.running or not system_running:
+            if not system_running:
                 break
+            if not robot.state.running:
+                robot.motor.stop()
+                time.sleep(interval)
+                continue
+
             emergency = robot.state.emergency_stop
 
-        # Lecture sécurisée des consignes calculées par la vision
         with lock:
             target_speed = local_control["speed"]
             target_angle = local_control["angle"]
@@ -262,12 +266,14 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
     robot.motor.stop()
     robot.head.set_angle_motor(0, STEER_CENTER_DEG)
 
-
 def thread_ultrasonic(robot: Robot, interval: float) -> None:
     while True:
         with robot.state.lock:
-            if not robot.state.running or not system_running:
+            if not system_running:
                 break
+            if not robot.state.running:
+                time.sleep(interval)
+                continue
         try:
             dist_mm = robot.ultrasonic.read_mm()
         except Exception:
@@ -277,13 +283,15 @@ def thread_ultrasonic(robot: Robot, interval: float) -> None:
             robot.state.emergency_stop = dist_mm < 120
         time.sleep(interval)
 
-
 def thread_LED(robot: Robot, interval: float):
     last_front_state = None
     while True:
         with robot.state.lock:
-            if not robot.state.running or not system_running:
+            if not system_running:
                 break
+            if not robot.state.running:
+                time.sleep(interval)
+                continue
             emergency = robot.state.emergency_stop
 
         with lock:
@@ -310,7 +318,6 @@ def thread_LED(robot: Robot, interval: float):
                 pass
             last_front_state = target_state
         time.sleep(interval)
-
 
 def thread_camera_loop(robot_instance: Robot, camera_instance=None):
     global system_running, current_encoded_frame
