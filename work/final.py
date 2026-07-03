@@ -38,6 +38,25 @@ step_manager = None
 log = None
 
 
+def calibration_sequence(robot_instance: Robot) -> None:
+    """Séquence de calibration matérielle pour l'étape suivante."""
+    global log, target_step
+    log.info("⚙️ CALIBRATION : Alignement des roues et réinitialisation des capteurs...")
+
+    with robot_instance.state.lock:
+        robot_instance.state.running = False
+
+    robot_instance.motor.reset()
+    robot_instance.head.set_angle_motor(0, 110)
+    robot_instance.motor.drive(camera_line3.Direction.FORWARD, 20, fast_accel=True)
+    time.sleep(0.5)
+    robot_instance.motor.reset()
+    robot_instance.head.set_angle_motor(0, 90)
+
+    log.info("⚙️ CALIBRATION : Terminée avec succès. Passage au mode Labyrinthe.")
+    target_step = "Labyrinthe"
+
+
 class StepConfig:
     def __init__(self, camera_angle: int, thread_factory: Callable[[], List[threading.Thread]]):
         self.camera_angle = camera_angle
@@ -68,7 +87,8 @@ class RobotStepManager:
             "1": "Line following",
             "2": "Obstacles",
             "3": "Labyrinthe",
-            "4": "Camera Line"
+            "4": "Camera Line",
+            "5": "Calibration"
         }
 
         self.steps: Dict[str, StepConfig] = {
@@ -90,6 +110,13 @@ class RobotStepManager:
                 camera_angle=90,
                 thread_factory=lambda: []
             ),
+            "Calibration": StepConfig(
+                camera_angle=90,
+                thread_factory=lambda: [
+                    threading.Thread(target=calibration_sequence, args=(robot_instance,), name="CALIB_EXEC",
+                                     daemon=True)
+                ]
+            ),
             "Labyrinthe": StepConfig(
                 camera_angle=110,
                 thread_factory=lambda: [
@@ -110,7 +137,8 @@ class RobotStepManager:
                                      args=(robot_instance, camera_line3.US_INTERVAL), name="US", daemon=True),
                     threading.Thread(target=camera_line3.thread_LED, args=(robot_instance, camera_line3.LED_INTERVAL),
                                      name="LED", daemon=True),
-                    threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance, self.camera), name="CAM_AUTO",
+                    threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance, self.camera),
+                                     name="CAM_AUTO",
                                      daemon=True),
                     threading.Thread(
                         target=lambda: camera_line3.app.run(host="0.0.0.0", port=5002, debug=False, threaded=True,
@@ -130,12 +158,20 @@ class RobotStepManager:
             return
         self.steps[self.current_step].stop()
 
+        try:
+            self.robot.led.arreter_clignotants()
+            self.robot.led.arreter_warning()
+            if hasattr(self.robot, 'front_leds'):
+                self.robot.front_leds.set_blink(None)
+        except Exception:
+            pass
+
         if new_step == "Camera Line":
             camera_line3.global_camera_ref = self.camera
             camera_line3.global_robot_ref = self.robot
 
         with self.robot.state.lock:
-            self.robot.state.running = True
+            self.robot.state.running = (new_step != "Calibration")
             self.robot.state.emergency_stop = False
 
         self.current_step = new_step
@@ -219,7 +255,7 @@ def index():
                 motor.innerText = data.robot_running ? "EN MARCHE" : "ARRÊTÉ";
                 motor.style.color = data.robot_running ? "#04d361" : "#fca3a3";
 
-                const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Camera Line": "m4" };
+                const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Camera Line": "m4", "Calibration": "m5" };
                 document.querySelectorAll('.btn-group.modes button').forEach(b => b.classList.remove('active'));
                 if (modes[data.current_step]) {
                     document.getElementById(modes[data.current_step]).classList.add('active');
@@ -337,13 +373,29 @@ if __name__ == "__main__":
 
     log.info("📡 Serveur de contrôle actif sur http://localhost:5001")
 
+    lost_line_timestamp = None
+
     try:
         while True:
             if step_manager.current_step != target_step:
                 log.info(f"Transition vers l'étape : {target_step}")
                 step_manager.transition_to(target_step)
+                lost_line_timestamp = None
 
-            time.sleep(0.1)
+            if step_manager.current_step == "Camera Line":
+                with camera_line3.lock:
+                    line_seen = camera_line3.telemetry.get("line_seen", "NON")
+
+                if line_seen == "NON":
+                    if lost_line_timestamp === None:
+                        lost_line_timestamp = time.time()
+                    elif time.time() - lost_line_timestamp >= 2.0:
+                        log.warning("⚠️ AUTOMATIQUE : Plus de rouge en bas depuis 2s ! Lancement Calibration.")
+                        target_step = "Calibration"
+                else:
+                    lost_line_timestamp = None
+
+            time.sleep(0.05)
 
     except KeyboardInterrupt:
         log.warning("Interruption détectée.")
