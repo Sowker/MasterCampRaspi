@@ -43,7 +43,7 @@ BYPASS_LEFT_ANGLE = WHEEL_ANGLE_CENTER + turning_angle
 
 
 AVOID_OBJ_SPEED = SPEED_NORMAL_PCT * 0.35
-BYPASS_SPEED = SPEED_NORMAL_PCT * 0.8
+BYPASS_SPEED = SPEED_NORMAL_PCT * 1
 
 SCAN_STEP = 10
 SCAN_WAIT_TIME = 0.2
@@ -270,8 +270,16 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         robot.head.set_angle_motor(0, counter_turn)
         time.sleep(0.3)
         robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
-        time.sleep(sleep_time)
+        time.sleep(1.5 * sleep_time)
         robot.motor.stop()
+
+        if MODE == MODE_AVOID_LINE: return
+
+        # realign
+        robot.head.set_angle_motor(0, turn)
+        time.sleep(0.3)
+        robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
+        time.sleep(sleep_time * 0.3)
 
         if MODE == MODE_AVOID_LINE: return
 
@@ -279,11 +287,23 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         robot.motor.stop()
         robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER)
 
+    def right_bypass(idx, dist)
+        print("turn right")
+        robot.motor.stop()
+        # input("next action")
+        bypass(robot, TURN_RIGHT, idx, dist)
+
+    def left_bypass(idx, dist)
+        print("turn left")
+        robot.motor.stop()
+        # input("next action")
+        bypass(robot, TURN_LEFT, idx, dist)
 
     # CONTROLLER MAIN LOGIC
     global scan
     try:
         driving = False
+        last_turn = None
         while True:
             with robot.state.lock: # stopping the loop when program is stopped
                 if not robot.state.running:
@@ -307,17 +327,20 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                     # print("min_dist_idx", min_dist_idx)
 
                     if MODE == MODE_AVOID_LINE: return
-
-                    if bypass_side(min_dist_idx) == TURN_RIGHT:
-                        print("turn right")
-                        robot.motor.stop()
-                        # input("next action")
-                        bypass(robot, TURN_RIGHT, min_dist_idx, min_dist)
+                    if last_turn is not None:
+                        if bypass_side(min_dist_idx) == TURN_RIGHT:
+                            right_bypass(min_dist_idx, min_dist)
+                            last_turn = TURN_RIGHT
+                        else:
+                            left_bypass(min_dist_idx, min_dist)
+                            last_turn = TURN_LEFT
                     else:
-                        print("turn left")
-                        robot.motor.stop()
-                        # input("next action")
-                        bypass(robot, TURN_LEFT, min_dist_idx, min_dist)
+                        if last_turn == TURN_RIGHT:
+                            left_bypass(min_dist_idx, min_dist)
+                            last_turn = TURN_LEFT
+                        else:
+                            right_bypass(min_dist_idx, min_dist)
+                            last_turn = TURN_RIGHT
                 elif not driving:
                     if MODE == MODE_AVOID_LINE: return
                     print("drive")
