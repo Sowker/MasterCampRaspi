@@ -188,14 +188,14 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
                 # backward maneuver
                 print("back maneuver")
                 robot.motor.stop()
-                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
+                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
                 time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
                 time.sleep(1.5)
             elif last_action == CirclePosition.TURN_RIGHT_SOFT or last_action == CirclePosition.TURN_RIGHT_HARD:
                 print("back maneuver")
                 robot.motor.stop()
-                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
+                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
                 time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
                 time.sleep(1.5)
