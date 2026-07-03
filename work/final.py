@@ -385,7 +385,7 @@ if __name__ == "__main__":
                         lost_line_timestamp = time.time()
                     elif time.time() - lost_line_timestamp >= 2.0:
                         log.warning("⚠️ AUTOMATIQUE : Plus de rouge en bas depuis 2s ! Lancement Calibration.")
-                        target_step = "Calibration"
+                        target_step = "Calibration Labyrinthe"
                 else:
                     lost_line_timestamp = None
 
