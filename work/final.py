@@ -212,7 +212,7 @@ def main(robot: Robot, args: str, camera: Picamera2, log: str):
             action = robot.state.action
 
         if current_action != action:
-            match action:
+            match current_action:
                 case "Transition Line following":
                     step_manager.transition_to("Transition Line following")
                     print("TRANSITION LINE FOLLOWING ------------------------")
