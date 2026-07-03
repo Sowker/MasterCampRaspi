@@ -387,7 +387,7 @@ if __name__ == "__main__":
                     line_seen = camera_line3.telemetry.get("line_seen", "NON")
 
                 if line_seen == "NON":
-                    if lost_line_timestamp === None:
+                    if lost_line_timestamp == None:
                         lost_line_timestamp = time.time()
                     elif time.time() - lost_line_timestamp >= 2.0:
                         log.warning("⚠️ AUTOMATIQUE : Plus de rouge en bas depuis 2s ! Lancement Calibration.")
