@@ -38,7 +38,7 @@ step_manager = None
 log = None
 
 
-def calibration_sequence(robot_instance: Robot) -> None:
+def calibration_sequence_camera_to_labyrinth(robot_instance: Robot) -> None:
     """Séquence de calibration matérielle pour l'étape suivante."""
     global log, target_step
     log.info("⚙️ CALIBRATION : Alignement des roues et réinitialisation des capteurs...")
@@ -110,10 +110,10 @@ class RobotStepManager:
                 camera_angle=90,
                 thread_factory=lambda: []
             ),
-            "Calibration": StepConfig(
+            "Calibration Labyrinthe": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence, args=(robot_instance,), name="CALIB_EXEC",
+                    threading.Thread(target=calibration_sequence_camera_to_labyrinth, args=(robot_instance,), name="CALIB_EXEC",
                                      daemon=True)
                 ]
             ),
@@ -156,27 +156,21 @@ class RobotStepManager:
     def transition_to(self, new_step: str) -> None:
         if new_step == self.current_step or new_step not in self.steps:
             return
+        with self.robot.state.lock:
+            self.robot.state.running = False
         self.steps[self.current_step].stop()
-
-        try:
-            self.robot.led.arreter_clignotants()
-            self.robot.led.arreter_warning()
-            if hasattr(self.robot, 'front_leds'):
-                self.robot.front_leds.set_blink(None)
-        except Exception:
-            pass
 
         if new_step == "Camera Line":
             camera_line3.global_camera_ref = self.camera
             camera_line3.global_robot_ref = self.robot
 
         with self.robot.state.lock:
-            self.robot.state.running = (new_step != "Calibration")
+            self.robot.state.running = (new_step != "Calibration Labyrinthe")
             self.robot.state.emergency_stop = False
 
         self.current_step = new_step
         self.steps[self.current_step].start(self.robot)
-
+        
     def shutdown_all(self) -> None:
         for step_config in self.steps.values():
             step_config.stop()
