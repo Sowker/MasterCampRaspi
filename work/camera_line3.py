@@ -388,7 +388,7 @@ if __name__ == "__main__":
 
     threads = [
         threading.Thread(target=thread_controller_camera_line, args=(robot, CTRL_INTERVAL), name="CTRL", daemon=True),
-        threading.Thread(target=target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
+        threading.Thread(target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
         threading.Thread(target=thread_LED, args=(robot, LED_INTERVAL), name="LED", daemon=True),
         threading.Thread(target=thread_camera_loop, args=(robot, picam), name="CAM_AUTO", daemon=True),
         threading.Thread(
