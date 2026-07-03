@@ -179,6 +179,10 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
                     print("STOP")
                     robot.motor.stop()
                     robot.head.set_angle_motor(0, STEER_CENTER_DEG)
+                    with robot.state.lock:
+                        if not robot.state.running:
+                            break
+                        robot.state.action = "Line following"
             else :
                 print("Detect that it need to stop")
                 stop = True

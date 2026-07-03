@@ -185,8 +185,10 @@ def main(robot: Robot, args: str, camera : Picamera2, log: str):
     step_manager.initialize()
 
     # First action in the circuit
-    step_manager.transition_to("Line following")
-    current_action = "Line following"
+    step_manager.transition_to("Transition Line following")
+    current_action = "Transition Line following"
+    with robot.state.lock:
+        robot.state.action = "Transition Line following"
 
     # Variable that hold the action of the robot
     action : str
