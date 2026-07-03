@@ -95,7 +95,7 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
         # On braque proportionnellement à l'erreur (MAX_STEER_DELTA = 45)
         final_angle_delta = (error_px / center_x) * 45
 
-        # Si l'erreur est très petite, la ligne est au milieu : on s'arrête !
+        # Si l'erreur est très petite (<= 25px), la ligne est au milieu : on s'arrête !
         if abs(error_px) <= 25:
             final_angle_delta = 0.0
             calculated_speed = 0
@@ -105,13 +105,11 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
             # Transition vers l'état suivant
             with robot_instance.state.lock:
                 robot_instance.state.action = "Line following"
-
         else:
             # La ligne est visible mais pas centrée : on tourne en roulant doucement
             calculated_speed = 37  # SPEED_MIN_PCT
             stable_dir = f"AJUSTEMENT ({error_px}px)"
             border_color = (255, 165, 0)  # Orange (Ajustement)
-
     else:
         # Aucune ligne en vue, on roule tout droit pour la chercher.
         final_angle_delta = 0.0
@@ -156,8 +154,10 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
             if not robot.state.running or not system_running:
                 break
             emergency = robot.state.emergency_stop
-            target_speed = robot.state.calculated_speed
-            target_angle = robot.state.calculated_angle
+            # Utilisation de getattr pour éviter les crashs si importé par un autre fichier
+            target_speed = getattr(robot.state, 'calculated_speed', 0)
+            target_angle = getattr(robot.state, 'calculated_angle', STEER_CENTER_DEG)
+            post_time = getattr(robot.state, 'post_time', 0)
 
         if emergency:
             robot.motor.stop()
@@ -165,30 +165,21 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
             time.sleep(interval)
             continue
 
-        print(f"Tagert angle : {target_angle}")
         if target_speed > 0:
-            print("Run")
             robot.head.set_angle_motor(0, 180 - target_angle)
             robot.motor.drive(Direction.FORWARD, target_speed, fast_accel=True)
+            stop = False  # RAZ du flag d'arrêt si on se remet à rouler
         else:
             if stop:
-                if time.time() <= robot.state.post_time + 2:
-                    print("in the couter to stop")
+                if time.time() <= post_time + 2:
                     robot.head.set_angle_motor(0, 180 - target_angle)
                 else:
-                    print("STOP")
                     robot.motor.stop()
                     robot.head.set_angle_motor(0, STEER_CENTER_DEG)
-                    with robot.state.lock:
-                        if not robot.state.running:
-                            break
-                        robot.state.action = "Line following"
-            else :
-                print("Detect that it need to stop")
+            else:
                 stop = True
                 with robot.state.lock:
                     robot.state.post_time = time.time()
-
 
         time.sleep(interval)
 
@@ -210,7 +201,6 @@ def thread_ultrasonic(robot: Robot, interval: float) -> None:
 
         with robot.state.lock:
             robot.state.distance_mm = dist_mm
-            # Déclenchement arrêt d'urgence matériel
             robot.state.emergency_stop = dist_mm < 120
 
         time.sleep(interval)
@@ -225,7 +215,8 @@ def thread_LED(robot: Robot, interval: float):
             if not robot.state.running or not system_running:
                 break
             emergency = robot.state.emergency_stop
-            angle = robot.state.calculated_angle
+            # Utilisation de getattr pour éviter les crashs si importé par un autre fichier
+            angle = getattr(robot.state, 'calculated_angle', STEER_CENTER_DEG)
 
         if emergency:
             target_state = 'warning'
@@ -256,15 +247,21 @@ def thread_LED(robot: Robot, interval: float):
         pass
 
 
-def thread_camera_loop(robot_instance: Robot):
+def thread_camera_loop(robot_instance: Robot, external_camera=None):
     """Boucle autonome qui lit la caméra en continu et met à jour les données"""
     global system_running, current_encoded_frame
 
-    picam = Picamera2()
-    config = picam.create_video_configuration(main={"size": (640, 480)})
-    picam.configure(config)
-    picam.start()
-    time.sleep(0.1)
+    # Accepte une caméra externe (venant du Main) pour éviter le crash "Device Busy"
+    if external_camera is None:
+        picam = Picamera2()
+        config = picam.create_video_configuration(main={"size": (640, 480)})
+        picam.configure(config)
+        picam.start()
+        time.sleep(0.1)
+        owns_camera = True
+    else:
+        picam = external_camera
+        owns_camera = False
 
     frame_count = 0
     t0 = time.time()
@@ -282,23 +279,24 @@ def thread_camera_loop(robot_instance: Robot):
                     telemetry["fps"] = round(frame_count / elapsed, 1)
                 frame_count, t0 = 0, time.time()
 
-            # Analyse l'image et met à jour les consignes moteurs immédiatement
+            # Analyse l'image et met à jour les consignes moteurs
             processed = process_frame(frame, robot_instance)
 
-            # Encode l'image traitée en JPG et la stocke pour Flask
+            # Encode l'image traitée en JPG et la stocke
             _, enc = cv2.imencode(".jpg", processed)
             with lock:
                 current_encoded_frame = enc.tobytes()
 
-            time.sleep(0.01)  # Petite pause pour le CPU
+            time.sleep(0.01)
     except Exception as e:
         print(f"Erreur flux vidéo autonome: {e}")
     finally:
-        picam.stop()
-        picam.close()
+        if owns_camera:
+            picam.stop()
+            picam.close()
 
 
-# POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION
+# POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION (POUR TESTER CE FICHIER SEUL)
 if __name__ == "__main__":
     args = parse_args()
 
@@ -311,10 +309,12 @@ if __name__ == "__main__":
     # Orientation physique initiale de l'axe vertical caméra
     robot.head.set_angle_motor(2, 60)
 
+    # Initialisation explicite des variables d'état pour éviter les crashs locaux
     with robot.state.lock:
         robot.state.calculated_speed = 0
         robot.state.calculated_angle = STEER_CENTER_DEG
         robot.state.distance_mm = 999
+        robot.state.post_time = 0
         robot.state.emergency_stop = False
 
     global_robot_ref = robot

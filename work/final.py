@@ -27,7 +27,7 @@ from labyrinthe_threads import (
     thread_drive as labyrinthe_thread_drive
 )
 
-# Threads — Suivi de Ligne Via Caméra Autonome
+# Threads — Suivi de Ligne Via Caméra Autonome (Flèches)
 from camera_line3 import (
     thread_controller_camera_line as thread_camera_line,
     CTRL_INTERVAL,
@@ -35,10 +35,17 @@ from camera_line3 import (
     US_INTERVAL,
     thread_LED as thread_camera_line_LED,
     LED_INTERVAL,
-    thread_camera_loop,
+    thread_camera_loop as cam3_thread_camera_loop,
     app as app_camera_line
 )
-from work.TransitionLineFollowing import thread_controller_camera_line, thread_ultrasonic, thread_LED
+
+# Threads - Transition Line Following
+from TransitionLineFollowing import (
+    thread_controller_camera_line as trans_thread_controller,
+    thread_ultrasonic as trans_thread_ultrasonic,
+    thread_LED as trans_thread_LED,
+    thread_camera_loop as trans_thread_camera_loop
+)
 
 frame_lock = threading.Lock()
 latest_frame = None
@@ -100,23 +107,19 @@ class RobotStepManager:
                 camera_angle=90,
                 thread_factory=lambda: [
                     threading.Thread(target=t11_thread_ultrasonic, args=(robot_instance, args_instance.sensor_interval),
-                                     name="US_IR",
-                                     daemon=True),
+                                     name="US_IR", daemon=True),
                     threading.Thread(target=t11_thread_line, args=(robot_instance, args_instance.sensor_interval),
-                                     name="LINE_IR",
-                                     daemon=True),
+                                     name="LINE_IR", daemon=True),
                     threading.Thread(target=t11_thread_LED, args=(robot_instance, args_instance.sensor_interval),
-                                     name="LED_IR",
-                                     daemon=True),
+                                     name="LED_IR", daemon=True),
                     threading.Thread(target=t11_thread_controller, args=(robot_instance, args_instance.ctrl_interval),
-                                     name="CTRL_IR",
-                                     daemon=True),
+                                     name="CTRL_IR", daemon=True),
                     threading.Thread(target=t11_thread_buzzer, args=(robot_instance,), name="BUZZER", daemon=True),
                 ]
             ),
             "Obstacles": StepConfig(
                 camera_angle=90,
-                thread_factory=lambda: []  # Ajoutez vos threads spécifiques aux Obstacles ici si nécessaire
+                thread_factory=lambda: []
             ),
             "Labyrinthe": StepConfig(
                 camera_angle=110,
@@ -138,18 +141,26 @@ class RobotStepManager:
                                      daemon=True),
                     threading.Thread(target=thread_camera_line_LED, args=(robot_instance, LED_INTERVAL), name="LED",
                                      daemon=True),
-                    threading.Thread(target=thread_camera_loop, args=(robot_instance,), name="CAM_AUTO", daemon=True),
+                    # On passe self.camera pour partager l'hardware !
+                    threading.Thread(target=cam3_thread_camera_loop, args=(robot_instance, self.camera),
+                                     name="CAM_AUTO", daemon=True),
                     threading.Thread(target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False,
-                                    threaded=True, use_reloader=False),name="WEB_CAM_LINE", daemon=True)
+                                                                        threaded=True, use_reloader=False),
+                                     name="WEB_CAM_LINE", daemon=True)
                 ]
             ),
             "Transition Line following": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
-                    threading.Thread(target=thread_controller_camera_line, args=(robot, CTRL_INTERVAL), name="CTRL",daemon=True),
-                    threading.Thread(target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
-                    threading.Thread(target=thread_LED, args=(robot, LED_INTERVAL), name="LED", daemon=True),
-                    threading.Thread(target=thread_camera_loop, args=(robot,), name="CAM_AUTO", daemon=True),
+                    # On utilise robot_instance (le lambda local) et on passe self.camera
+                    threading.Thread(target=trans_thread_controller, args=(robot_instance, CTRL_INTERVAL), name="CTRL",
+                                     daemon=True),
+                    threading.Thread(target=trans_thread_ultrasonic, args=(robot_instance, US_INTERVAL), name="US",
+                                     daemon=True),
+                    threading.Thread(target=trans_thread_LED, args=(robot_instance, LED_INTERVAL), name="LED",
+                                     daemon=True),
+                    threading.Thread(target=trans_thread_camera_loop, args=(robot_instance, self.camera),
+                                     name="CAM_AUTO", daemon=True),
                 ]
             ),
         }
@@ -175,7 +186,7 @@ class RobotStepManager:
 
 # FONCTIONS POUR LA STATE MACHINE
 
-def main(robot: Robot, args: str, camera : Picamera2, log: str):
+def main(robot: Robot, args: str, camera: Picamera2, log: str):
     log.info("╔══════════════════════════════════════════════╗")
     log.info("║  Robot Line Follower — Team C — SE 2026      ║")
     log.info("╚══════════════════════════════════════════════╝")
@@ -187,21 +198,24 @@ def main(robot: Robot, args: str, camera : Picamera2, log: str):
     # First action in the circuit
     step_manager.transition_to("Transition Line following")
     current_action = "Transition Line following"
+
     with robot.state.lock:
+        if not robot.state.running:
+            return  # CHANGED: Using return instead of break here since we aren't in a loop yet
         robot.state.action = "Transition Line following"
 
     # Variable that hold the action of the robot
-    action : str
+    action = ""
 
     while True:
         with robot.state.lock:
             if not robot.state.running:
-                break
+                break  # Safe to use break inside the while loop
             action = robot.state.action
 
         if current_action != action:
             match action:
-                case "Transiton Line following":
+                case "Transition Line following":
                     step_manager.transition_to("Transition Line following")
                 case "Line following":
                     step_manager.transition_to("Line following")
@@ -213,8 +227,7 @@ def main(robot: Robot, args: str, camera : Picamera2, log: str):
                     step_manager.transition_to("Flèches")
             current_action = action
 
-
-    # Need to have a thread that constantly check the state of the robot to change the manuver
+        time.sleep(0.1)  # Small sleep to prevent maxing out the CPU in this loop!
 
 
 # ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE (SANS DÉTECTION) ────────────────
@@ -409,40 +422,4 @@ if __name__ == "__main__":
     step_manager.initialize()
 
     # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
-    global_threads = [
-        threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
-        threading.Thread(target=main, args=(robot, args, camera, log), name="GLOBAL_CAM", daemon=True)
-    ]
-
-    for gt in global_threads:
-        gt.start()
-
-    log.info("📡 Serveur global disponible sur http://localhost:5001")
-
-    try:
-        while True:
-            if step_manager.current_step != target_step:
-                log.info(f"Transition vers l'étape : {target_step}")
-                step_manager.transition_to(target_step)
-
-            time.sleep(0.1)
-
-    except KeyboardInterrupt:
-        log.warning("Interruption utilisateur détectée (Ctrl+C).")
-
-    finally:
-        log.info("Arrêt global du robot et nettoyage des ressources...")
-        system_running = False
-
-        with robot.state.lock:
-            robot.state.running = False
-        step_manager.shutdown_all()
-
-        try:
-            camera.stop()
-            camera.close()
-        except Exception:
-            pass
-
-        robot.shutdown()
-        log.info("Système correctement arrêté.")
+    global_threads =
