@@ -194,80 +194,97 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Supervision Globale - Team C</title>
+        <title>Cockpit Team C - SE 2026</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121214; color: #e1e1e6; text-align: center; padding: 20px; margin: 0; }
-            h1 { color: #04d361; margin-bottom: 20px; }
-            .container { max-width: 750px; margin: 0 auto; background: #202024; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-            .video-box { position: relative; display: inline-block; width: 100%; max-width: 640px; }
-            img { width: 100%; border-radius: 6px; border: 2px solid #29292e; background: #000; }
+            body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f11; color: #e1e1e6; margin: 0; padding: 20px; display: flex; justify-content: center; }
+            .container { width: 100%; max-width: 540px; background: #17171a; padding: 20px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #242429; }
+            h1 { color: #04d361; font-size: 1.5em; margin-top: 0; margin-bottom: 15px; letter-spacing: 0.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
 
-            .section-title { font-size: 1.1em; color: #04d361; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 10px 0; font-weight: bold;}
-            .btn-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 15px; }
+            /* Taille vidéo réduite et optimisée */
+            .video-box { width: 100%; max-width: 480px; margin: 0 auto 15px auto; overflow: hidden; border-radius: 8px; border: 2px solid #242429; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); font-size: 0; }
+            img { width: 100%; height: auto; aspect-ratio: 4 / 3; background: #000; }
 
-            button { background: #29292e; color: #e1e1e6; border: 2px solid #3e3e44; padding: 12px 24px; font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; min-width: 140px; }
-            button:hover { background: #3e3e44; border-color: #04d361; }
-            button:active { transform: scale(0.98); }
+            .status-panel { background: #111112; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #202024; display: flex; justify-content: space-around; font-size: 0.9em; }
+            .status-item { display: flex; flex-direction: column; gap: 4px; }
+            .status-label { font-size: 0.75em; color: #7c7c8a; text-transform: uppercase; letter-spacing: 0.5px; }
+            .status-val { font-weight: bold; font-size: 1.05em; color: #fff; }
 
-            button.btn-start { background: #1b4d22; border-color: #2e7d32; color: #a5d6a7; }
-            button.btn-start:hover { background: #2e7d32; }
-            button.btn-stop { background: #661a1a; border-color: #c62828; color: #ef9a9a; }
-            button.btn-stop:hover { background: #c62828; }
+            .section-title { font-size: 0.8em; color: #7c7c8a; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px 0; text-align: left; font-weight: bold; }
+            .btn-group { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
 
-            .status-panel { background: #1a1a1e; padding: 12px; border-radius: 6px; margin-top: 15px; border: 1px solid #29292e; display: flex; justify-content: space-around; font-size: 0.95em; }
-            .status-val { color: #04d361; font-weight: bold; }
+            button { background: #202024; color: #e1e1e6; border: 1px solid #2e2e35; padding: 14px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+            button:hover { background: #29292e; border-color: #04d361; }
+            button:active { transform: scale(0.97); }
+
+            button.btn-start { background: #12361b; border-color: #1e592c; color: #87f5a9; grid-column: span 1; }
+            button.btn-start:hover { background: #1b4d26; }
+            button.btn-stop { background: #4a1919; border-color: #732727; color: #fca3a3; grid-column: span 1; }
+            button.btn-stop:hover { background: #612222; }
+
+            .btn-group.modes button { text-align: center; }
+            .btn-group.modes button.active { border-color: #04d361; background: #242429; color: #04d361; box-shadow: 0 0 8px rgba(4,211,97,0.2); }
         </style>
         <script>
             function sendCommand(endpoint, param='') {
                 let url = endpoint + (param ? '?mode=' + param : '');
                 fetch(url, { method: 'POST' })
                 .then(response => response.json())
-                .then(data => {
-                    updateUI(data);
-                })
+                .then(data => updateUI(data))
                 .catch(err => console.error('Erreur:', err));
             }
 
             function updateUI(data) {
                 document.getElementById('current-mode-status').innerText = data.current_step;
-                document.getElementById('motor-status').innerText = data.robot_running ? "ACTIF" : "ARRÊTÉ (running=false)";
-                document.getElementById('motor-status').style.color = data.robot_running ? "#04d361" : "#ef9a9a";
+
+                const motor = document.getElementById('motor-status');
+                motor.innerText = data.robot_running ? "EN MARCHE" : "ARRÊTÉ";
+                motor.style.color = data.robot_running ? "#04d361" : "#fca3a3";
+
+                // Gestion de la classe active sur les boutons de mode
+                const modes = { "Line following": "m1", "Obstacles": "m2", "Labyrinthe": "m3", "Flèches": "m4" };
+                document.querySelectorAll('.btn-group.modes button').forEach(b => b.classList.remove('active'));
+                if (modes[data.current_step]) {
+                    document.getElementById(modes[data.current_step]).classList.add('active');
+                }
             }
 
             setInterval(() => {
-                fetch('/status')
-                .then(res => res.json())
-                .then(data => updateUI(data))
-                .catch(err => console.error(err));
+                fetch('/status').then(res => res.json()).then(data => updateUI(data)).catch(err => console.error(err));
             }, 1000);
         </script>
     </head>
     <body>
         <div class="container">
-            <h1>Cockpit de Contrôle — Team C</h1>
+            <h1>Cockpit Robot — Team C</h1>
 
             <div class="video-box">
-                <img src="/video_feed" alt="Flux vidéo live">
+                <img src="/video_feed" alt="Flux live">
             </div>
 
             <div class="status-panel">
-                <div>Statut Global Robot: <span id="motor-status" class="status-val">--</span></div>
-                <div>Mode Actif: <span id="current-mode-status" class="status-val">--</span></div>
+                <div class="status-item">
+                    <span class="status-label">Moteurs (running)</span>
+                    <span id="motor-status" class="status-val">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Mode Actif</span>
+                    <span id="current-mode-status" class="status-val">--</span>
+                </div>
             </div>
 
-            <div class="section-title">Commandes Générales</div>
+            <div class="section-title">Alimentation Principale</div>
             <div class="btn-group">
-                <button class="btn-start" onclick="sendCommand('/control/start')">START (running=true)</button>
-                <button class="btn-stop" onclick="sendCommand('/control/stop')">STOP (running=false)</button>
+                <button class="btn-start" onclick="sendCommand('/control/start')">▶ START (running=true)</button>
+                <button class="btn-stop" onclick="sendCommand('/control/stop')">🛑 STOP (running=false)</button>
             </div>
 
-            <div class="section-title">Sélection du Mode (Circuit)</div>
-            <div class="btn-group">
-                <button onclick="sendCommand('/control/mode', '1')">Line Following</button>
-                <button onclick="sendCommand('/control/mode', '2')">Obstacles</button>
-                <button onclick="sendCommand('/control/mode', '3')">Labyrinthe</button>
-                <button onclick="sendCommand('/control/mode', '4')">Flèches</button>
+            <div class="section-title">Changement de Mode Manuel</div>
+            <div class="btn-group modes">
+                <button id="m1" onclick="sendCommand('/control/mode', '1')">Line Following</button>
+                <button id="m2" onclick="sendCommand('/control/mode', '2')">Obstacles</button>
+                <button id="m3" onclick="sendCommand('/control/mode', '3')">Labyrinthe</button>
+                <button id="m4" onclick="sendCommand('/control/mode', '4')">Flèches</button>
             </div>
         </div>
     </body>
@@ -294,9 +311,9 @@ def get_status():
 def web_start():
     global robot, log
     with robot.state.lock:
-        robot.state.running = True
-        robot.state.emergency_stop = False
-    log.info("🌐 WEB : robot.state.running = True")
+        robot.state.running = True  # Relance la boucle globale
+        robot.state.emergency_stop = False  # Réarme le flag matériel si existant
+    log.info("🌐 WEB : Réactivation complète du robot -> robot.state.running = True")
     return jsonify({"status": "success", "robot_running": True, "current_step": step_manager.current_step})
 
 
@@ -304,9 +321,9 @@ def web_start():
 def web_stop():
     global robot, log
     with robot.state.lock:
-        robot.state.running = False
-    robot.motor.stop()
-    log.warning("🛑 WEB : robot.state.running = False (Moteurs coupés)")
+        robot.state.running = False  # Coupe la boucle d'exécution du robot
+    robot.motor.stop()  # Arrêt immédiat de sécurité
+    log.warning("🛑 WEB : Coupure immédiate du robot -> robot.state.running = False")
     return jsonify({"status": "success", "robot_running": False, "current_step": step_manager.current_step})
 
 
@@ -317,7 +334,7 @@ def web_change_mode():
     if mode_id in step_manager.step_mapping:
         next_step = step_manager.step_mapping[mode_id]
         target_step = next_step
-        log.info(f"🔄 WEB : Transition manuelle -> Mode : '{next_step}'")
+        log.info(f"🔄 WEB : Transition -> Mode : '{next_step}'")
         return jsonify({"status": "success", "robot_running": robot.state.running, "current_step": next_step})
     return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
@@ -356,7 +373,6 @@ if __name__ == "__main__":
 
     try:
         while True:
-            # Gestion des changements d'états demandés par la page web
             if step_manager.current_step != target_step:
                 log.info(f"Transition vers l'étape : {target_step}")
                 step_manager.transition_to(target_step)
