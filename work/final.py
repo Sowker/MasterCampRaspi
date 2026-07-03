@@ -451,6 +451,15 @@ def web_change_mode():
     return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
 
+def run_flask_server():
+    """Lance le serveur web global sur le port 5001."""
+    # Désactiver le logger par défaut de Flask pour éviter de polluer vos logs
+    import logging
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+    app_global.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False, threaded=True)
+
+
 # ── POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION ──────────────────────────────────────
 
 if __name__ == "__main__":
@@ -482,7 +491,8 @@ if __name__ == "__main__":
     # Déploiement du thread unifié d'observation (Webcam + State Watcher)
     global_threads = [
         threading.Thread(target=thread_global_camera_and_state, args=(camera, log, robot), name="GLOBAL_CAM_STATE",
-                         daemon=True)
+                         daemon=True),
+        threading.Thread(target=run_flask_server, name="WEB_SERVER", daemon=True)
     ]
 
     for gt in global_threads:
