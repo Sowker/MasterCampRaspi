@@ -86,7 +86,7 @@ class RobotStepManager:
 
         self.steps: Dict[str, StepConfig] = {
             "Line following": StepConfig(
-                camera_angle=90,
+                camera_angle=60,
                 thread_factory=lambda: [
                     threading.Thread(target=t11_thread_ultrasonic, args=(robot_instance, args_instance.sensor_interval),
                                      name="US_IR", daemon=True),
