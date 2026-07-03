@@ -154,10 +154,8 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
             if not robot.state.running or not system_running:
                 break
             emergency = robot.state.emergency_stop
-            # Utilisation de getattr pour éviter les crashs si importé par un autre fichier
-            target_speed = getattr(robot.state, 'calculated_speed', 0)
-            target_angle = getattr(robot.state, 'calculated_angle', STEER_CENTER_DEG)
-            post_time = getattr(robot.state, 'post_time', 0)
+            target_speed = robot.state.calculated_speed
+            target_angle = robot.state.calculated_angle
 
         if emergency:
             robot.motor.stop()
@@ -168,14 +166,17 @@ def thread_controller_camera_line(robot: Robot, interval: float) -> None:
         if target_speed > 0:
             robot.head.set_angle_motor(0, 180 - target_angle)
             robot.motor.drive(Direction.FORWARD, target_speed, fast_accel=True)
-            stop = False  # RAZ du flag d'arrêt si on se remet à rouler
         else:
             if stop:
-                if time.time() <= post_time + 4:
+                if time.time() <= robot.state.post_time + 2:
                     robot.head.set_angle_motor(0, 180 - target_angle)
                 else:
                     robot.motor.stop()
                     robot.head.set_angle_motor(0, STEER_CENTER_DEG)
+                    with robot.state.lock:
+                        if not robot.state.running:
+                            break
+                        robot.state.action = "Line following"
             else:
                 stop = True
                 with robot.state.lock:
