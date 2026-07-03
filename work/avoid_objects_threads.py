@@ -136,7 +136,7 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
             break
         time.sleep(0.05)
 
-    last_correction = None
+    last_action = None
     while True:
         # ── Lecture atomique de l'état simplifié ──────────────────
         with robot.state.lock:
@@ -153,43 +153,50 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
 
         # Lire les capteurs bruts (gauche, milieu, droit)
         current_action = robot.state.line_action
-        print("ACTION LINE:", action_direction(current_action))
+        if current_action != last_action:
+            print("ACTION LINE:", action_direction(current_action))
 
         # Comportement d'ÉVITEMENT (s'inspire de t7 mais inversé)
         # Priorité : détection droite -> tourner à gauche; détection gauche -> tourner à droite
         if current_action == CirclePosition.TURN_RIGHT_SOFT:
             # Approche depuis la droite -> tourner doucement à gauche
-            last_correction = current_action
+            last_action = current_action
             robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_RIGHT_HARD:
             # Trop à droite -> tourner fort à gauche
-            last_correction = current_action
+            last_action = current_action
             robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_LEFT_SOFT:
             # Approche depuis la gauche -> tourner doucement à droite
-            last_correction = current_action
+            last_action = current_action
             robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_LEFT_HARD:
             # Trop à gauche -> tourner fort à droite
-            last_correction = current_action
+            last_action = current_action
             robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
         elif current_action ==  CirclePosition.STRAIGHT:
             # Ligne centrée -> tout droit
-            if last_correction == CirclePosition.TURN_LEFT_SOFT or last_correction == CirclePosition.TURN_LEFT_HARD:
+            if last_action == CirclePosition.TURN_LEFT_SOFT or last_action == CirclePosition.TURN_LEFT_HARD:
                 # backward maneuver
+                print("back maneuver")
+                robot.motor.stop()
                 robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
+                time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_SPEED, fast_accel=True)
                 time.sleep(1.5)
-            elif last_correction == CirclePosition.TURN_RIGHT_SOFT or last_correction == CirclePosition.TURN_RIGHT_HARD:
+            elif last_action == CirclePosition.TURN_RIGHT_SOFT or last_action == CirclePosition.TURN_RIGHT_HARD:
+                print("back maneuver")
+                robot.motor.stop()
                 robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
+                time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_SPEED, fast_accel=True)
                 time.sleep(1.5)
             # in all cases
