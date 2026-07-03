@@ -49,7 +49,7 @@ SCAN_STEP = 10
 SCAN_WAIT_TIME = 0.2
 
 # CONSTANTS AND VARIABLES FOR AVOID LINES
-AVOID_LINE_SPEED = 20
+AVOID_LINE_SPEED = AVOID_OBJ_SPEED
 
 
 def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
