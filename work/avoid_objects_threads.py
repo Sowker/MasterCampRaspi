@@ -184,12 +184,17 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
         elif current_action ==  CirclePosition.STRAIGHT:
             # Ligne centrée -> tout droit
             if last_correction == CirclePosition.TURN_LEFT_SOFT or last_correction == CirclePosition.TURN_LEFT_HARD:
-                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
-            elif last_correction == CirclePosition.TURN_RIGHT_SOFT or last_correction == CirclePosition.TURN_RIGHT_HARD:
+                # backward maneuver
                 robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
-            else:
-                robot.head.steer_center()
-                robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
+                robot.motor.drive(Direction.BACKWARD, AVOID_LINE_SPEED, fast_accel=True)
+                time.sleep(1.5)
+            elif last_correction == CirclePosition.TURN_RIGHT_SOFT or last_correction == CirclePosition.TURN_RIGHT_HARD:
+                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
+                robot.motor.drive(Direction.BACKWARD, AVOID_LINE_SPEED, fast_accel=True)
+                time.sleep(1.5)
+            # in all cases
+            robot.head.steer_center()
+            robot.motor.drive(Direction.FORWARD, AVOID_LINE_SPEED, fast_accel=True)
 
         else:
             # Aucun capteur -> avancer doucement ou chercher
