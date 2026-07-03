@@ -56,13 +56,18 @@ telemetry = {
     "emergency": False
 }
 
+# ── NOUVELLES VARIABLES LOCALES POUR ÉVITER LES ERREURS DE STATE ──────────────
+local_control = {
+    "speed": 0,
+    "angle": STEER_CENTER_DEG
+}
+
 current_encoded_frame = None
 system_running = True
 
-# Changement de nom pour éviter les collisions d'importation dans le main
 app = Flask(__name__)
 global_robot_ref = None
-global_camera_ref = None  # Référence de secours
+global_camera_ref = None
 
 
 def get_red_mask(roi: np.ndarray) -> np.ndarray:
@@ -88,7 +93,6 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
     center_x = width // 2
     output = frame.copy()
 
-    # Définition des zones (ROIs)
     roi_low_top, roi_low_bot = int(height * 0.70), int(height * 0.90)
     roi_high_top, roi_high_bot = int(height * 0.20), int(height * 0.40)
 
@@ -98,7 +102,6 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
     M_low = cv2.moments(mask_low)
     M_high = cv2.moments(mask_high)
 
-    # Overlays graphiques
     cv2.line(output, (0, roi_low_top), (width, roi_low_top), (0, 140, 255), 1)
     cv2.line(output, (0, roi_high_top), (width, roi_high_top), (0, 255, 255), 1)
     cv2.line(output, (center_x, 0), (center_x, height), (255, 0, 0), 1)
@@ -200,20 +203,19 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
         stable_dir = "LIGNE PERDUE"
         border_color = (0, 0, 255)
 
+    # Récupération de l'état ultrason global de manière standard
     with robot_instance.state.lock:
         is_emergency = robot_instance.state.emergency_stop
         current_dist = getattr(robot_instance.state, 'distance_mm', 0)
-        if is_emergency:
-            calculated_speed = 0
-        robot_instance.state.calculated_speed = calculated_speed
-        robot_instance.state.calculated_angle = int(STEER_CENTER_DEG + final_angle_delta)
 
-    cv2.putText(output, f"Servo Delta: {int(final_angle_delta)}deg | Vitesse: {calculated_speed}%", (10, height - 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(output, f"STRAT: {stable_dir}", (10, 35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, border_color, 2)
+    if is_emergency:
+        calculated_speed = 0
 
+    # Stockage dans le dictionnaire de contrôle LOCAL
     with lock:
+        local_control["speed"] = calculated_speed
+        local_control["angle"] = int(STEER_CENTER_DEG + final_angle_delta)
+
         telemetry["line_seen"] = line_seen
         telemetry["error_px"] = int(final_angle_delta)
         telemetry["stable_dir"] = stable_dir
@@ -221,18 +223,26 @@ def process_frame(frame: np.ndarray, robot_instance: Robot) -> np.ndarray:
         telemetry["speed_pct"] = calculated_speed
         telemetry["emergency"] = is_emergency
 
+    cv2.putText(output, f"Servo Delta: {int(final_angle_delta)}deg | Vitesse: {calculated_speed}%", (10, height - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(output, f"STRAT: {stable_dir}", (10, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, border_color, 2)
+
     return output
 
 
 def thread_controller_camera_line(robot: Robot, interval: float) -> None:
-    """Boucle matérielle principale d'actionnement de la propulsion et direction."""
+    """Boucle matérielle principale. Lit local_control au lieu de robot.state."""
     while True:
         with robot.state.lock:
             if not robot.state.running or not system_running:
                 break
             emergency = robot.state.emergency_stop
-            target_speed = robot.state.calculated_speed
-            target_angle = robot.state.calculated_angle
+
+        # Lecture sécurisée des consignes calculées par la vision
+        with lock:
+            target_speed = local_control["speed"]
+            target_angle = local_control["angle"]
 
         if emergency:
             robot.motor.stop()
@@ -275,7 +285,9 @@ def thread_LED(robot: Robot, interval: float):
             if not robot.state.running or not system_running:
                 break
             emergency = robot.state.emergency_stop
-            angle = robot.state.calculated_angle
+
+        with lock:
+            angle = local_control["angle"]
 
         if emergency:
             target_state = 'warning'
@@ -301,7 +313,6 @@ def thread_LED(robot: Robot, interval: float):
 
 
 def thread_camera_loop(robot_instance: Robot, camera_instance=None):
-    """Utilise directement l'instance de caméra passée en argument pour capturer les frames."""
     global system_running, current_encoded_frame
     frame_count = 0
     t0 = time.time()
@@ -373,17 +384,13 @@ if __name__ == "__main__":
 
     robot = Robot(args)
     robot.init()
-    if not hasattr(robot.state, 'calculated_angle'):
-        robot.state.calculated_angle = STEER_CENTER_DEG
 
     robot.head.set_angle_motor(2, 60)
 
-    # Mode Standalone : On crée l'unique instance caméra ici
     picam = Picamera2()
     picam.configure(picam.create_video_configuration(main={"size": (640, 480)}))
     picam.start()
     global_camera_ref = picam
-
     global_robot_ref = robot
 
     threads = [
