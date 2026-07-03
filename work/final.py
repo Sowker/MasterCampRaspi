@@ -38,6 +38,7 @@ from camera_line3 import (
     thread_camera_loop,
     app as app_camera_line
 )
+from work.TransitionLineFollowing import thread_controller_camera_line, thread_ultrasonic, thread_LED
 
 frame_lock = threading.Lock()
 latest_frame = None
@@ -138,13 +139,19 @@ class RobotStepManager:
                     threading.Thread(target=thread_camera_line_LED, args=(robot_instance, LED_INTERVAL), name="LED",
                                      daemon=True),
                     threading.Thread(target=thread_camera_loop, args=(robot_instance,), name="CAM_AUTO", daemon=True),
-                    threading.Thread(
-                        target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False, threaded=True,
-                                                           use_reloader=False),
-                        name="WEB_CAM_LINE", daemon=True
-                    )
+                    threading.Thread(target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False,
+                                    threaded=True, use_reloader=False),name="WEB_CAM_LINE", daemon=True)
                 ]
-            )
+            ),
+            "Transition Line following": StepConfig(
+                camera_angle=60,
+                thread_factory=lambda: [
+                    threading.Thread(target=thread_controller_camera_line, args=(robot, CTRL_INTERVAL), name="CTRL",daemon=True),
+                    threading.Thread(target=thread_ultrasonic, args=(robot, US_INTERVAL), name="US", daemon=True),
+                    threading.Thread(target=thread_LED, args=(robot, LED_INTERVAL), name="LED", daemon=True),
+                    threading.Thread(target=thread_camera_loop, args=(robot,), name="CAM_AUTO", daemon=True),
+                ]
+            ),
         }
 
     def initialize(self) -> None:
@@ -164,6 +171,48 @@ class RobotStepManager:
         """Force l'arrêt de tous les gestionnaires d'étapes."""
         for step_config in self.steps.values():
             step_config.stop()
+
+
+# FONCTIONS POUR LA STATE MACHINE
+
+def main(robot: Robot, args: str, camera : Picamera2, log: str):
+    log.info("╔══════════════════════════════════════════════╗")
+    log.info("║  Robot Line Follower — Team C — SE 2026      ║")
+    log.info("╚══════════════════════════════════════════════╝")
+
+    # Instanciation de la machine à états
+    step_manager = RobotStepManager(robot, camera, args)
+    step_manager.initialize()
+
+    # First action in the circuit
+    step_manager.transition_to("Line following")
+    current_action = "Line following"
+
+    # Variable that hold the action of the robot
+    action : str
+
+    while True:
+        with robot.state.lock:
+            if not robot.state.running:
+                break
+            action = robot.state.action
+
+        if current_action != action:
+            match action:
+                case "Transiton Line following":
+                    step_manager.transition_to("Transition Line following")
+                case "Line following":
+                    step_manager.transition_to("Line following")
+                case "Obstacles":
+                    step_manager.transition_to("Obstacles")
+                case "Labyrinthe":
+                    step_manager.transition_to("Labyrinthe")
+                case "Flèches":
+                    step_manager.transition_to("Flèches")
+            current_action = action
+
+
+    # Need to have a thread that constantly check the state of the robot to change the manuver
 
 
 # ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE (SANS DÉTECTION) ────────────────
@@ -360,10 +409,7 @@ if __name__ == "__main__":
     # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
     global_threads = [
         threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
-        threading.Thread(
-            target=lambda: app_global.run(host="0.0.0.0", port=5001, debug=False, threaded=True, use_reloader=False),
-            name="WEB_GLOBAL", daemon=True
-        )
+        threading.Thread(target=main, args=(robot, args, camera, log), name="GLOBAL_CAM", daemon=True)
     ]
 
     for gt in global_threads:
