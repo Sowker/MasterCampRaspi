@@ -3,7 +3,7 @@ import time
 from t11_robot import Robot
 
 
-from t3_servomotors import WHEEL_ANGLE_CENTER, HEAD_ANGLE_CENTER, STEER_SOFT_DEG, STEER_HARD_DEG
+from t3_servomotors import WHEEL_ANGLE_CENTER, HEAD_ANGLE_CENTER, STEER_SOFT_DEG, STEER_HARD_DEG, CHANNEL_SERVO_VERTICAL, CHANNEL_SERVO_HORIZONTAL, CHANNEL_SERVO_WHEEL
 from t4_dc_motor import Direction, SPEED_NORMAL_PCT
 from line_avoid import CirclePosition
 
@@ -58,23 +58,21 @@ def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
 
     def scan_cm() -> list:
         # scanning from left to right using the ultrasonic module
-        HR_MOTOR = 1
-        VR_MOTOR = 2
         data = []
         start_position = int(HEAD_ANGLE_CENTER - (SCAN_ANGLE/2))  # right
         end_position = int(HEAD_ANGLE_CENTER + (SCAN_ANGLE/2))    # left
-        robot.head.set_angle_motor(VR_MOTOR, HEAD_ANGLE_CENTER + 5) # looking forward vertically
-        robot.head.set_angle_motor(HR_MOTOR, start_position)      #setting at start position
+        robot.head.set_angle_motor(CHANNEL_SERVO_VERTICAL, HEAD_ANGLE_CENTER + 5) # looking forward vertically
+        robot.head.set_angle_motor(CHANNEL_SERVO_HORIZONTAL, start_position)      #setting at start position
         time.sleep(0.2) # waiting head to be ready
         data_str = ""
         for angle in range(start_position, end_position+1, SCAN_STEP): # scanning from left ro right
-            robot.head.set_angle_motor(HR_MOTOR, angle)
+            robot.head.set_angle_motor(CHANNEL_SERVO_HORIZONTAL, angle)
             time.sleep(SCAN_WAIT_TIME)
             distance_cm = robot.ultrasonic.read_mm()/10
             data.append(distance_cm)
             data_str = str(round(distance_cm, 1)) + " " + data_str
         # print(data_str)
-        robot.head.set_angle_motor(HR_MOTOR, HEAD_ANGLE_CENTER)
+        robot.head.set_angle_motor(CHANNEL_SERVO_HORIZONTAL, HEAD_ANGLE_CENTER)
         return data
 
     while True:
@@ -84,8 +82,8 @@ def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
 
         scan = scan_cm() # scanning and putting the result in the global scan variable
         if MODE == MODE_AVOID_LINE:
-            robot.head.set_angle_motor(2, 60)  # looking downward to see the blue square
-            robot.head.set_angle_motor(1, HEAD_ANGLE_CENTER)
+            robot.head.set_angle_motor(CHANNEL_SERVO_VERTICAL, 60)  # looking downward to see the blue square
+            robot.head.set_angle_motor(CHANNEL_SERVO_HORIZONTAL, HEAD_ANGLE_CENTER+5)
             return
 
 def thread_line_detect_avoid(robot: Robot, interval: float) -> None:
@@ -164,25 +162,25 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
         if current_action == CirclePosition.TURN_RIGHT_SOFT:
             # Approche depuis la droite -> tourner doucement à gauche
             last_action = current_action
-            robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_SOFT_DEG)
+            robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER - STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_RIGHT_HARD:
             # Trop à droite -> tourner fort à gauche
             last_action = current_action
-            robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
+            robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_LEFT_SOFT:
             # Approche depuis la gauche -> tourner doucement à droite
             last_action = current_action
-            robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_SOFT_DEG)
+            robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
         elif current_action == CirclePosition.TURN_LEFT_HARD:
             # Trop à gauche -> tourner fort à droite
             last_action = current_action
-            robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
+            robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
         elif current_action ==  CirclePosition.STRAIGHT or current_action == CirclePosition.INTERSECTION:
@@ -191,14 +189,14 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
                 # backward maneuver
                 print("back maneuver")
                 robot.motor.stop()
-                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
+                robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
                 time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
                 time.sleep(1.5)
             elif last_action == CirclePosition.TURN_RIGHT_SOFT or last_action == CirclePosition.TURN_RIGHT_HARD:
                 print("back maneuver")
                 robot.motor.stop()
-                robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
+                robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
                 time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
                 time.sleep(1.5)
@@ -257,7 +255,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
 
         # backward a bit first
         robot.motor.drive(Direction.BACKWARD, SPEED_NORMAL_PCT * 0.5)
-        robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER)
+        robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER)
         backward_sleep_time = max(0, ((1 - ratio_angle) + (2 - ratio_distance * 2))/2)  # between 0 and 1 seconds, inversly proportional to the distance and to the angle
         time.sleep(backward_sleep_time)
         print("backward_sleep_time ", backward_sleep_time)
@@ -281,7 +279,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         if MODE == MODE_AVOID_LINE: return
 
         # turn
-        robot.head.set_angle_motor(0, turn)
+        robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, turn)
         time.sleep(0.3)
         robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
         time.sleep(sleep_time)
@@ -291,7 +289,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         if MODE == MODE_AVOID_LINE: return
 
         # counter_turn
-        robot.head.set_angle_motor(0, counter_turn)
+        robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, counter_turn)
         time.sleep(0.3)
         robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
         time.sleep(1 * sleep_time)
@@ -301,7 +299,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
 
         # reset T pose
         robot.motor.stop()
-        robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER)
+        robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER)
 
     def right_bypass(idx, dist):
         print("turn right")
@@ -353,7 +351,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                     print("drive")
                     robot.motor.stop()
                     driving = True
-                    robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER)
+                    robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER)
                     robot.motor.drive(Direction.FORWARD, AVOID_OBJ_SPEED)
             else:
                 print("no data yet")
