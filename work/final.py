@@ -11,6 +11,7 @@ from picamera2 import Picamera2
 from logger import get_logger
 from t11_argument_parser import parse_args
 from t11_robot import Robot
+from panneaux_detect import classify_sign
 
 # Threads — Suivi de Ligne Via Capteurs IR
 from t11_threads import (
@@ -187,6 +188,15 @@ def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
             cv2.rectangle(frame_bgr, (0, roi_top), (width, height), (0, 0, 255) if red_pixels > 400 else (0, 255, 0), 2)
             cv2.putText(frame_bgr, f"Zone Rouge: {red_pixels}px", (10, roi_top - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255) if red_pixels > 400 else (0, 255, 0), 1)
+
+            hsv_full = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+            panneau = classify_sign(hsv_full)
+            if panneau == "Tunnel" and target_step != "Labyrinthe":
+                log_instance.info("Panneau Tunnel détecté --> bascule vers Labyrinthe.")
+                target_step = "Labyrinthe"
+            elif panneau == "Travaux" and target_step != "Obstacles":
+                log_instance.info("Panneau Travaux détecté --> bascule vers Obstacles.")
+                target_step = "Obstacles"
 
             with frame_lock:
                 latest_frame = frame_bgr.copy()

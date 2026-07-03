@@ -1,29 +1,22 @@
 import cv2
 import numpy as np
 import time
+from picamera2 import Picamera2
 from pannel_test import get_color_mask
 
-# ── PC : webcam ──────────────────────────────────────────────────────
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-# ── Pi : remplace les 2 lignes ci-dessus par : ───────────────────────
-# from picamera2 import Picamera2
-# picam = Picamera2()
-# picam.configure(picam.create_preview_configuration(main={"format":"RGB888","size":(640,480)}))
-# picam.start()
+picam = Picamera2()
+picam.configure(picam.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)}))
+picam.start()
 
 last_print_t = 0
 last_panneau = None
 
+print("Démarrage — Ctrl+C pour arrêter. Images dans /tmp/pannel_*.jpg")
+
 try:
     while True:
-        # ── PC ──────────────────────────────────────────────────────
-        ret, frame = cap.read()
-        if not ret:
-            break
-        # ── Pi : remplace les 2 lignes ci-dessus par : ──────────────
-        # frame = picam.capture_array()
-        # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame = picam.capture_array()
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         h, w  = frame.shape[:2]
         hsv   = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -53,37 +46,24 @@ try:
             if panneau:
                 panneau_detecte = panneau
 
-            # Dessin sur la frame
-            color_draw = (255, 100, 0) if couleur == "bleu" else (0, 200, 255)
-            cv2.drawContours(frame, [c], -1, color_draw, 2)
-            label = f"{couleur} | {forme} | {ratio*100:.1f}%"
-            if panneau:
-                label += f"  → {panneau}"
-            x, y, _, _ = cv2.boundingRect(c)
-            cv2.putText(frame, label, (x, max(y - 8, 15)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_draw, 2)
+            print(f"  {couleur:6s} | {forme:12s} | {ratio*100:.1f}% | {panneau or '---'}", end="\r")
 
-        # Résultat en grand en haut de la frame
-        if panneau_detecte:
-            cv2.putText(frame, panneau_detecte, (20, 45),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 255, 0), 3)
-
-        # Console : affiche seulement si ça change, max 1 fois/sec
+        # Affiche dans la console seulement si ça change
         now = time.monotonic()
-        if panneau_detecte != last_panneau or now - last_print_t > 1.0:
-            print(f"→ {panneau_detecte or 'rien'}")
+        if panneau_detecte != last_panneau or now - last_print_t > 2.0:
+            print(f"\n→ PANNEAU : {panneau_detecte or 'rien'}")
             last_panneau = panneau_detecte
             last_print_t = now
 
-        cv2.imshow("Camera",       frame)
-        cv2.imshow("Masque bleu",  masks["bleu"])
-        cv2.imshow("Masque jaune", masks["jaune"])
+        # Sauvegarde images pour visualiser via scp
+        cv2.imwrite("/tmp/pannel_frame.jpg", frame)
+        cv2.imwrite("/tmp/pannel_bleu.jpg",  masks["bleu"])
+        cv2.imwrite("/tmp/pannel_jaune.jpg", masks["jaune"])
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        time.sleep(0.1)
 
 except KeyboardInterrupt:
     pass
 
-cap.release()
-cv2.destroyAllWindows()
+picam.stop()
+print("\nArrêté.")
