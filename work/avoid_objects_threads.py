@@ -5,7 +5,7 @@ from t11_robot import Robot
 
 from t3_servomotors import WHEEL_ANGLE_CENTER, HEAD_ANGLE_CENTER, STEER_SOFT_DEG, STEER_HARD_DEG, CHANNEL_SERVO_VERTICAL, CHANNEL_SERVO_HORIZONTAL, CHANNEL_SERVO_WHEEL
 from t4_dc_motor import Direction, SPEED_NORMAL_PCT
-from line_avoid import CirclePosition
+from t6_line_tracking import LinePosition
 
 # Constantes
 
@@ -99,11 +99,11 @@ def thread_line_detect_avoid(robot: Robot, interval: float) -> None:
                 break
 
         # Capture matérielle et décodage atomique (Hors du Lock pour optimiser)
-        current_action = robot.line_avoider.read_action()
+        current_action = robot.line_tracker.read_action()
 
         with robot.state.lock:
             robot.state.line_action = current_action
-        if current_action != CirclePosition.LOST_IN_CENTER:
+        if current_action != LinePosition.LINE_LOST:
             MODE = MODE_AVOID_LINE
         time.sleep(interval)
 
@@ -115,15 +115,15 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
     """
     global MODE
 
-    def action_direction(action: CirclePosition) -> str:
+    def action_direction(action: LinePosition) -> str:
         directions = {
-            CirclePosition.STRAIGHT: "tout droit",
-            CirclePosition.TURN_LEFT_SOFT: "à gauche (léger)",
-            CirclePosition.TURN_LEFT_HARD: "à gauche (fort)",
-            CirclePosition.TURN_RIGHT_SOFT: "à droite (léger)",
-            CirclePosition.TURN_RIGHT_HARD: "à droite (fort)",
-            CirclePosition.INTERSECTION: "ambigu",
-            CirclePosition.LOST_IN_CENTER: "recherche",
+            LinePosition.STRAIGHT: "tout droit",
+            LinePosition.TURN_RIGHT_HARD: "à gauche (léger)",
+            LinePosition.TURN_RIGHT_SOFT: "à gauche (fort)",
+            LinePosition.TURN_LEFT_HARD: "à droite (léger)",
+            LinePosition.TURN_LEFT_SOFT: "à droite (fort)",
+            LinePosition.INTERSECTION: "ambigu",
+            LinePosition.LINE_LOST: "recherche",
         }
         return directions.get(action, "inconnue")
 
@@ -133,7 +133,7 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
             if not robot.state.running:
                 break
             emergency = robot.state.emergency_stop
-        if robot.state.line_action != CirclePosition.LOST_IN_CENTER:
+        if robot.state.line_action != LinePosition.LINE_LOST:
             break
         time.sleep(0.05)
 
@@ -159,33 +159,33 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
 
         # Comportement d'ÉVITEMENT (s'inspire de t7 mais inversé)
         # Priorité : détection droite -> tourner à gauche; détection gauche -> tourner à droite
-        if current_action == CirclePosition.TURN_RIGHT_SOFT:
+        if current_action == LinePosition.TURN_LEFT_HARD:
             # Approche depuis la droite -> tourner doucement à gauche
             last_action = current_action
             robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER - STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
-        elif current_action == CirclePosition.TURN_RIGHT_HARD:
+        elif current_action == LinePosition.TURN_LEFT_SOFT:
             # Trop à droite -> tourner fort à gauche
             last_action = current_action
             robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER - STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
-        elif current_action == CirclePosition.TURN_LEFT_SOFT:
+        elif current_action == LinePosition.TURN_RIGHT_HARD:
             # Approche depuis la gauche -> tourner doucement à droite
             last_action = current_action
             robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_SOFT_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
-        elif current_action == CirclePosition.TURN_LEFT_HARD:
+        elif current_action == LinePosition.TURN_RIGHT_SOFT:
             # Trop à gauche -> tourner fort à droite
             last_action = current_action
             robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
-        elif current_action ==  CirclePosition.STRAIGHT or current_action == CirclePosition.INTERSECTION:
+        elif current_action ==  LinePosition.STRAIGHT or current_action == LinePosition.INTERSECTION:
             # Ligne centrée -> tout droit
-            if last_action == CirclePosition.TURN_LEFT_SOFT or last_action == CirclePosition.TURN_LEFT_HARD:
+            if last_action == LinePosition.TURN_RIGHT_HARD or last_action == LinePosition.TURN_RIGHT_SOFT:
                 # backward maneuver
                 print("back maneuver")
                 robot.motor.stop()
@@ -193,7 +193,7 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
                 time.sleep(0.2)
                 robot.motor.drive(Direction.BACKWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
                 time.sleep(1.5)
-            elif last_action == CirclePosition.TURN_RIGHT_SOFT or last_action == CirclePosition.TURN_RIGHT_HARD:
+            elif last_action == LinePosition.TURN_LEFT_HARD or last_action == LinePosition.TURN_LEFT_SOFT:
                 print("back maneuver")
                 robot.motor.stop()
                 robot.head.set_angle_motor(CHANNEL_SERVO_WHEEL, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
