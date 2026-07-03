@@ -107,9 +107,9 @@ class RobotStepManager:
             "Labyrinthe": StepConfig(
                 camera_angle=110,
                 thread_factory=lambda: [
-                    threading.Thread(target=labyrinthe_thread_ultrasonic, args=(robot, args.interval),
+                    threading.Thread(target=labyrinthe_thread_ultrasonic, args=(robot, args.sensor_interval),
                                      name="US_Labyrinthe", daemon=True),
-                    threading.Thread(target=labyrinthe_thread_drive, args=(robot, args.interval, self.camera),
+                    threading.Thread(target=labyrinthe_thread_drive, args=(robot, args.sensor_interval, self.camera),
                                      name="Camera_Labyrinthe", daemon=True)
                 ]
             ),
