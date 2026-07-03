@@ -72,7 +72,7 @@ class RobotStepManager:
             "1": "Line following",
             "2": "Obstacles",
             "3": "Labyrinthe",
-            "4": "Flèches"
+            "4": "Camera Line"
         }
 
         self.steps: Dict[str, StepConfig] = {
@@ -105,7 +105,7 @@ class RobotStepManager:
                                      name="Camera_Labyrinthe", daemon=True)
                 ]
             ),
-            "Flèches": StepConfig(
+            "Camera Line": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
                     threading.Thread(target=camera_line3.thread_controller_camera_line,
@@ -138,6 +138,10 @@ class RobotStepManager:
         if new_step == "Flèches":
             camera_line3.global_camera_ref = self.camera
             camera_line3.global_robot_ref = self.robot
+
+        with self.robot.state.lock:
+            self.robot.state.running = True
+            self.robot.state.emergency_stop = False
 
         self.current_step = new_step
         self.steps[self.current_step].start(self.robot)
