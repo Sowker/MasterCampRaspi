@@ -492,7 +492,8 @@ if __name__ == "__main__":
     global_threads = [
         threading.Thread(target=thread_global_camera_and_state, args=(camera, log, robot), name="GLOBAL_CAM_STATE",
                          daemon=True),
-        threading.Thread(target=run_flask_server, name="WEB_SERVER", daemon=True)
+        threading.Thread(target=lambda: app_global.run(host="0.0.0.0", port=5001, debug=False, threaded=True, use_reloader=False),
+                         name="WEB_GLOBAL", daemon=True)
     ]
 
     for gt in global_threads:
