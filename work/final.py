@@ -39,6 +39,15 @@ robot = None
 step_manager = None
 log = None
 
+
+def run_calibration_and_route(calib_func: Callable[[Robot], str], robot_instance: Robot) -> None:
+    """Exécute une fonction de calibration et intercepte son retour pour mettre à jour target_step."""
+    global target_step
+    next_step = calib_func(robot_instance)
+    if next_step:
+        target_step = next_step
+
+
 class StepConfig:
     def __init__(self, camera_angle: int, thread_factory: Callable[[], List[threading.Thread]]):
         self.camera_angle = camera_angle
@@ -93,7 +102,7 @@ class RobotStepManager:
             "Calibration Obstacles": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence_IR_to_obstacles, args=(robot_instance,),
+                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_IR_to_obstacles, robot_instance),
                                      name="CALIB_OBST", daemon=True)
                 ]
             ),
@@ -104,7 +113,7 @@ class RobotStepManager:
             "Calibration Ligne Rouge": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence_obstacles_to_camera_line, args=(robot_instance,),
+                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_obstacles_to_camera_line, robot_instance),
                                      name="CALIB_ROUGE", daemon=True)
                 ]
             ),
@@ -129,7 +138,7 @@ class RobotStepManager:
             "Calibration Labyrinthe": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=calibration_sequence_camera_to_labyrinth, args=(robot_instance,),
+                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_camera_to_labyrinth, robot_instance),
                                      name="CALIB_LABY", daemon=True)
                 ]
             ),
@@ -173,7 +182,6 @@ class RobotStepManager:
     def shutdown_all(self) -> None:
         for step_config in self.steps.values():
             step_config.stop()
-
 
 
 def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
@@ -226,10 +234,6 @@ def generate_global_frames():
                    b'Content-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n')
         time.sleep(0.05)
 
-
-# ==========================================
-# SERVEUR FLASK DE CONTRÔLE (PORT 5001)
-# ==========================================
 
 @app_global.route('/')
 def index():
