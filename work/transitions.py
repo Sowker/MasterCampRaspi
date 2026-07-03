@@ -11,9 +11,10 @@ def calibration_sequence_IR_to_obstacles(robot_instance: Robot) -> str:
         robot_instance.state.running = False
 
     robot_instance.motor.reset()
-    robot_instance.head.set_angle_motor(0, 90)
+    robot_instance.head.set_angle_motor(0, 110)
     robot_instance.motor.drive(camera_line3.Direction.FORWARD, 20, fast_accel=True)
     time.sleep(1.5)
+    robot_instance.head.set_angle_motor(0, 90)
     robot_instance.motor.reset()
 
 
