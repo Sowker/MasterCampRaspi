@@ -53,7 +53,8 @@ from TransitionLineFollowing import (
 frame_lock = threading.Lock()
 latest_frame = None
 system_running = True
-target_step = "Line following"
+# L'état initial cible
+target_step = "Transition Line following"
 
 # Configuration du serveur Flask global pour la supervision (Port 5001)
 app_global = Flask(__name__)
@@ -132,7 +133,8 @@ class RobotStepManager:
             "Calibration Obstacles": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_IR_to_obstacles, robot_instance),
+                    threading.Thread(target=run_calibration_and_route,
+                                     args=(calibration_sequence_IR_to_obstacles, robot_instance),
                                      name="CALIB_OBST", daemon=True)
                 ]
             ),
@@ -143,7 +145,8 @@ class RobotStepManager:
             "Calibration Ligne Rouge": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_obstacles_to_camera_line, robot_instance),
+                    threading.Thread(target=run_calibration_and_route,
+                                     args=(calibration_sequence_obstacles_to_camera_line, robot_instance),
                                      name="CALIB_ROUGE", daemon=True)
                 ]
             ),
@@ -166,7 +169,8 @@ class RobotStepManager:
             "Calibration Labyrinthe": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=run_calibration_and_route, args=(calibration_sequence_camera_to_labyrinth, robot_instance),
+                    threading.Thread(target=run_calibration_and_route,
+                                     args=(calibration_sequence_camera_to_labyrinth, robot_instance),
                                      name="CALIB_LABY", daemon=True)
                 ]
             ),
@@ -190,7 +194,6 @@ class RobotStepManager:
                                      daemon=True),
                     threading.Thread(target=thread_camera_line_LED, args=(robot_instance, LED_INTERVAL), name="LED",
                                      daemon=True),
-                    # On passe self.camera pour partager l'hardware !
                     threading.Thread(target=cam3_thread_camera_loop, args=(robot_instance, self.camera),
                                      name="CAM_AUTO", daemon=True),
                     threading.Thread(target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False,
@@ -201,7 +204,6 @@ class RobotStepManager:
             "Transition Line following": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
-                    # On utilise robot_instance (le lambda local) et on passe self.camera
                     threading.Thread(target=trans_thread_controller, args=(robot_instance, CTRL_INTERVAL), name="CTRL",
                                      daemon=True),
                     threading.Thread(target=trans_thread_ultrasonic, args=(robot_instance, US_INTERVAL), name="US",
@@ -226,6 +228,9 @@ class RobotStepManager:
 
         with self.robot.state.lock:
             self.robot.state.running = False
+            # Synchro de l'action interne pour éviter le rebond d'état
+            self.robot.state.action = new_step
+
         self.steps[self.current_step].stop()
 
         if new_step == "Camera Line":
@@ -246,61 +251,20 @@ class RobotStepManager:
             step_config.stop()
 
 
-# FONCTIONS POUR LA STATE MACHINE
+# ── FONCTION UNIFIÉE : CAMÉRA GLOBALE ET SUPERVISION D'ÉTAT ──────────────────
 
-def main(robot: Robot, args: str, camera: Picamera2, log: str):
-
-    # Instanciation de la machine à états
-    step_manager = RobotStepManager(robot, camera, args)
-    step_manager.initialize()
-
-    # First action in the circuit
-    step_manager.transition_to("Transition Line following")
-    current_action = "Transition Line following"
-
-    with robot.state.lock:
-        if not robot.state.running:
-            return  # CHANGED: Using return instead of break here since we aren't in a loop yet
-        robot.state.action = "Transition Line following"
-    print("TRANSITION LINE FOLLOWING----------------------------------------------")
-
-    # Variable that hold the action of the robot
-    action = "Transition Line following"
-
-    while True:
-        with robot.state.lock:
-            if not robot.state.running:
-                break  # Safe to use break inside the while loop
-            action = robot.state.action
-
-        if current_action != action:
-            match current_action:
-                case "Transition Line following":
-                    step_manager.transition_to("Transition Line following")
-                    print("TRANSITION LINE FOLLOWING ------------------------")
-                case "Line following":
-                    print("LINE FOLLOWING--------------------------------")
-                    step_manager.transition_to("Line following")
-                case "Obstacles":
-                    step_manager.transition_to("Obstacles")
-                case "Labyrinthe":
-                    step_manager.transition_to("Labyrinthe")
-                case "Flèches":
-                    step_manager.transition_to("Flèches")
-            current_action = action
-
-        time.sleep(0.1)  # Small sleep to prevent maxing out the CPU in this loop!
-
-
-# ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE (SANS DÉTECTION) ────────────────
-
-def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
+def thread_global_camera_and_state(camera_instance: Picamera2, log_instance, robot_instance: Robot):
+    """
+    Tâche de fond qui met à jour l'image brute, analyse les balises bleues,
+    et écoute les requêtes internes de changement d'état (ex: robot.state.action).
+    """
     global latest_frame, system_running, target_step, step_manager
 
     lower_blue = np.array([100, 150, 50])
     upper_blue = np.array([140, 255, 255])
 
     while system_running:
+        # --- PARTIE A : CAPTURE CAMÉRA ET ANALYSE ---
         try:
             frame = camera_instance.capture_array()
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -317,15 +281,28 @@ def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
                 current = step_manager.current_step if step_manager else ""
 
                 if current == "Line following" and target_step == "Line following":
-                    log_instance.warning(f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Suivi Ligne IR")
+                    log_instance.warning(
+                        f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Suivi Ligne IR")
                     target_step = "Calibration Obstacles"
 
                 elif current == "Obstacles" and target_step == "Obstacles":
-                    log_instance.warning(f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Obstacles")
+                    log_instance.warning(
+                        f"[CV] BALISE_DETECTEE: Masse bleue en bas ({blue_pixels}px) -> Interception Obstacles")
                     target_step = "Calibration Ligne Rouge"
 
         except Exception:
             pass
+
+        # --- PARTIE B : LECTURE DE L'ÉTAT DU ROBOT (Demandes internes) ---
+        with robot_instance.state.lock:
+            action = getattr(robot_instance.state, 'action', "")
+
+        current = step_manager.current_step if step_manager else ""
+        # Si un thread a modifié l'action et qu'on n'est pas déjà en train de la faire
+        if action and action != current and action != target_step:
+            log_instance.info(f"[STATE] Changement d'état interne demandé : {action}")
+            target_step = action
+
         time.sleep(0.04)
 
 
@@ -489,6 +466,7 @@ if __name__ == "__main__":
 
     with robot.state.lock:
         robot.state.running = False
+        robot.state.action = target_step  # Sync avec target_step
 
     if not hasattr(robot.state, 'calculated_angle'):
         robot.state.calculated_angle = 90
@@ -501,10 +479,10 @@ if __name__ == "__main__":
     step_manager = RobotStepManager(robot, camera, args)
     step_manager.initialize()
 
-    # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
+    # Déploiement du thread unifié d'observation (Webcam + State Watcher)
     global_threads = [
-        threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
-        threading.Thread(target=main, args=(robot, args, camera, log), name="STATE_MACHINE", daemon=True)
+        threading.Thread(target=thread_global_camera_and_state, args=(camera, log, robot), name="GLOBAL_CAM_STATE",
+                         daemon=True)
     ]
 
     for gt in global_threads:
@@ -514,13 +492,16 @@ if __name__ == "__main__":
 
     lost_line_timestamp = None
 
+    # Boucle de Contrôle (Orchestrateur Principal)
     try:
         while True:
+            # 1. Vérifie si un changement d'état est requis
             if step_manager.current_step != target_step:
                 log.info(f"[SYS] TRANSITION: '{step_manager.current_step}' -> '{target_step}'")
                 step_manager.transition_to(target_step)
                 lost_line_timestamp = None
 
+            # 2. Logique spécifique pour la caméra (Keepalive Timeout)
             if step_manager.current_step == "Camera Line":
                 with camera_line3.lock:
                     line_seen = camera_line3.telemetry.get("line_seen", "NON")
