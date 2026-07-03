@@ -14,7 +14,7 @@ from adafruit_pca9685 import PCA9685
 import logger
 from t11_argument_parser import parse_args
 from t11_robot import Robot
-from line_avoid_threads import thread_ultrasonic, thread_line, thread_LED, thread_controller
+from avoid_objects_threads import thread_ultrasonic_scanning, thread_object_controller, thread_line_detect_avoid, thread_avoid_line_controller
 
 # ═══════════════════════════════════════════════════════════════════
 #  POINT D'ENTRÉE
@@ -35,8 +35,10 @@ if __name__ == "__main__":
     robot.init()
 
     threads = [
-        threading.Thread(target=thread_line, args=(robot, args.sensor_interval), name="LINE", daemon=True),
-        threading.Thread(target=thread_controller, args=(robot, args.ctrl_interval), name="CTRL", daemon=True),
+        threading.Thread(target=thread_ultrasonic_scanning, args=(robot, args.sensor_interval), name="US", daemon=True),
+        threading.Thread(target=thread_object_controller, args=(robot, args.ctrl_interval), name="CTRL_OBJ", daemon=True),
+        threading.Thread(target=thread_line_detect_avoid, args=(robot, args.sensor_interval), name="LINE", daemon=True),
+        threading.Thread(target=thread_avoid_line_controller, args=(robot, args.ctrl_interval), name="CTRL_LINE", daemon=True),
     ]
 
     for t in threads:
@@ -57,7 +59,7 @@ if __name__ == "__main__":
             robot.state.running = False
 
         for t in threads:
-            t.join(timeout=3.0)
+            t.join(timeout=4.0)
             if t.is_alive():
                 log.warning("Thread %s ne s'est pas arrêté dans le délai", t.name)
 
