@@ -118,14 +118,12 @@ class RobotStepManager:
         # Définition des stratégies de chaque étape
         self.steps: Dict[str, StepConfig] = {
             "Line following": StepConfig(
-                camera_angle=90,
+                camera_angle=60,
                 thread_factory=lambda: [
                     threading.Thread(target=t11_thread_ultrasonic, args=(robot_instance, args_instance.sensor_interval),
                                      name="US_IR", daemon=True),
                     threading.Thread(target=t11_thread_line, args=(robot_instance, args_instance.sensor_interval),
                                      name="LINE_IR", daemon=True),
-                    threading.Thread(target=t11_thread_LED, args=(robot_instance, args_instance.sensor_interval),
-                                     name="LED_IR", daemon=True),
                     threading.Thread(target=t11_thread_controller, args=(robot_instance, args_instance.ctrl_interval),
                                      name="CTRL_IR", daemon=True),
                     threading.Thread(target=t11_thread_buzzer, args=(robot_instance,), name="BUZZER", daemon=True),
@@ -156,8 +154,6 @@ class RobotStepManager:
                                      args=(robot_instance, camera_line3.CTRL_INTERVAL), name="CTRL", daemon=True),
                     threading.Thread(target=camera_line3.thread_ultrasonic,
                                      args=(robot_instance, camera_line3.US_INTERVAL), name="US", daemon=True),
-                    threading.Thread(target=camera_line3.thread_LED, args=(robot_instance, camera_line3.LED_INTERVAL),
-                                     name="LED", daemon=True),
                     threading.Thread(target=camera_line3.thread_camera_loop, args=(robot_instance, self.camera),
                                      name="CAM_AUTO", daemon=True),
                     threading.Thread(

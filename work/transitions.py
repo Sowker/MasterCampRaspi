@@ -12,7 +12,10 @@ def calibration_sequence_IR_to_obstacles(robot_instance: Robot) -> str:
 
     robot_instance.motor.reset()
     robot_instance.head.set_angle_motor(0, 90)
-    time.sleep(0.3)
+    robot_instance.motor.drive(camera_line3.Direction.FORWARD, 20, fast_accel=True)
+    time.sleep(1.5)
+    robot_instance.motor.reset()
+
 
     print("[SYS] CALIBRATION_OK: OBSTACLES -> Passage automatique à 'Obstacles'")
     return "Obstacles"
@@ -27,7 +30,7 @@ def calibration_sequence_obstacles_to_camera_line(robot_instance: Robot) -> str:
 
     robot_instance.motor.reset()
     robot_instance.head.set_angle_motor(2, 60)
-    time.sleep(0.5)
+    time.sleep(0.4)
 
     print("[SYS] CALIBRATION_OK: LIGNE_ROUGE -> Passage automatique à 'Camera Line'")
     return "Camera Line"
