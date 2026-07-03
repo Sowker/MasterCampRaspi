@@ -182,7 +182,7 @@ def thread_avoid_line_controller(robot: Robot, interval: float) -> None:
             robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER + STEER_HARD_DEG)
             robot.motor.drive(Direction.FORWARD, AVOID_LINE_TURN_SPEED, fast_accel=True)
 
-        elif current_action ==  CirclePosition.STRAIGHT:
+        elif current_action ==  CirclePosition.STRAIGHT or current_action == CirclePosition.INTERSECTION:
             # Ligne centrée -> tout droit
             if last_action == CirclePosition.TURN_LEFT_SOFT or last_action == CirclePosition.TURN_LEFT_HARD:
                 # backward maneuver
