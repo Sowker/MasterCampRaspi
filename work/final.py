@@ -422,4 +422,40 @@ if __name__ == "__main__":
     step_manager.initialize()
 
     # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
-    global_threads =
+    global_threads =[
+        threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
+        threading.Thread(target=main, args=(robot, args, camera, log), name="STATE_MACHINE", daemon=True)
+    ]
+
+    for gt in global_threads:
+        gt.start()
+
+    log.info("📡 Serveur global disponible sur http://localhost:5001")
+
+    try:
+        while True:
+            if step_manager.current_step != target_step:
+                log.info(f"Transition vers l'étape : {target_step}")
+                step_manager.transition_to(target_step)
+
+            time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        log.warning("Interruption utilisateur détectée (Ctrl+C).")
+
+    finally:
+        log.info("Arrêt global du robot et nettoyage des ressources...")
+        system_running = False
+
+        with robot.state.lock:
+            robot.state.running = False
+        step_manager.shutdown_all()
+
+        try:
+            camera.stop()
+            camera.close()
+        except Exception:
+            pass
+
+        robot.shutdown()
+        log.info("Système correctement arrêté.")
