@@ -43,7 +43,7 @@ BYPASS_LEFT_ANGLE = WHEEL_ANGLE_CENTER + turning_angle
 
 
 AVOID_OBJ_SPEED = SPEED_NORMAL_PCT * 0.35
-BYPASS_SPEED = SPEED_NORMAL_PCT * 0.7
+BYPASS_SPEED = SPEED_NORMAL_PCT * 0.8
 
 SCAN_STEP = 10
 SCAN_WAIT_TIME = 0.2
@@ -325,23 +325,24 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                     # print("min_dist_idx", min_dist_idx)
 
                     if MODE == MODE_AVOID_LINE: return
-                    if last_turn is None:
-                        print(" None")
-                        print(bypass_side(min_dist_idx))
-                        if bypass_side(min_dist_idx) == TURN_RIGHT:
-                            right_bypass(min_dist_idx, min_dist)
-                            last_turn = TURN_RIGHT
-                        else:
-                            left_bypass(min_dist_idx, min_dist)
-                            last_turn = TURN_LEFT
+
+                    # if last_turn is None:
+                    print(" None")
+                    print(bypass_side(min_dist_idx))
+                    if bypass_side(min_dist_idx) == TURN_RIGHT:
+                        right_bypass(min_dist_idx, min_dist)
+                        last_turn = TURN_RIGHT
                     else:
-                        print("not None")
-                        if last_turn == TURN_RIGHT:
-                            left_bypass(min_dist_idx, min_dist)
-                            last_turn = TURN_LEFT
-                        else:
-                            right_bypass(min_dist_idx, min_dist)
-                            last_turn = TURN_RIGHT
+                        left_bypass(min_dist_idx, min_dist)
+                        last_turn = TURN_LEFT
+                    # else:
+                    #     print("not None")
+                    #     if last_turn == TURN_RIGHT:
+                    #         left_bypass(min_dist_idx, min_dist)
+                    #         last_turn = TURN_LEFT
+                    #     else:
+                    #         right_bypass(min_dist_idx, min_dist)
+                    #         last_turn = TURN_RIGHT
                 elif not driving:
                     if MODE == MODE_AVOID_LINE: return
                     print("drive")
