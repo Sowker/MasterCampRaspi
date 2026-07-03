@@ -287,13 +287,13 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         robot.motor.stop()
         robot.head.set_angle_motor(0, WHEEL_ANGLE_CENTER)
 
-    def right_bypass(idx, dist)
+    def right_bypass(idx, dist):
         print("turn right")
         robot.motor.stop()
         # input("next action")
         bypass(robot, TURN_RIGHT, idx, dist)
 
-    def left_bypass(idx, dist)
+    def left_bypass(idx, dist):
         print("turn left")
         robot.motor.stop()
         # input("next action")
