@@ -4,14 +4,13 @@ import sys
 import cv2
 import numpy as np
 from typing import Dict, List, Callable
-from flask import Flask, Response, render_template_string
+from flask import Flask, Response, render_template_string, request, jsonify
 
 # Configuration matérielle
 from picamera2 import Picamera2
 from logger import get_logger
 from t11_argument_parser import parse_args
 from t11_robot import Robot
-from panneaux_detect import classify_sign
 
 # Threads — Suivi de Ligne Via Capteurs IR
 from t11_threads import (
@@ -48,6 +47,11 @@ target_step = "Line following"
 # Configuration du serveur Flask global pour la supervision (Port 5001)
 app_global = Flask(__name__)
 
+# Références globales requises pour les routes Flask
+robot = None
+step_manager = None
+log = None
+
 
 class StepConfig:
     """Structure de données pour configurer chaque étape du robot."""
@@ -57,9 +61,9 @@ class StepConfig:
         self.thread_factory = thread_factory
         self.active_threads: List[threading.Thread] = []
 
-    def start(self, robot: Robot) -> None:
+    def start(self, robot_instance: Robot) -> None:
         """oriente la caméra, génère les threads et les lance."""
-        robot.head.set_angle_motor(2, self.camera_angle)
+        robot_instance.head.set_angle_motor(2, self.camera_angle)
         self.active_threads = self.thread_factory()
         for thread in self.active_threads:
             thread.start()
@@ -75,18 +79,18 @@ class StepConfig:
 class RobotStepManager:
     """Gère les transitions d'états du robot"""
 
-    def __init__(self, robot: Robot, camera_instance: Picamera2, args):
-        self.robot = robot
+    def __init__(self, robot_instance: Robot, camera_instance: Picamera2, args_instance):
+        self.robot = robot_instance
         self.camera = camera_instance
-        self.args = args
+        self.args = args_instance
         self.current_step: str = "Line following"
 
-        # Mapping pour la console clavier
+        # Mapping mis à jour pour correspondre à votre nouveau cycle manuel
         self.step_mapping = {
             "1": "Line following",
-            "2": "Labyrinthe",
-            "3": "Camera Line",
-            "4": "Obstacles"
+            "2": "Obstacles",
+            "3": "Labyrinthe",
+            "4": "Flèches"
         }
 
         # Définition des stratégies de chaque étape
@@ -94,44 +98,52 @@ class RobotStepManager:
             "Line following": StepConfig(
                 camera_angle=90,
                 thread_factory=lambda: [
-                    threading.Thread(target=t11_thread_ultrasonic, args=(robot, args.sensor_interval), name="US_IR",
+                    threading.Thread(target=t11_thread_ultrasonic, args=(robot_instance, args_instance.sensor_interval),
+                                     name="US_IR",
                                      daemon=True),
-                    threading.Thread(target=t11_thread_line, args=(robot, args.sensor_interval), name="LINE_IR",
+                    threading.Thread(target=t11_thread_line, args=(robot_instance, args_instance.sensor_interval),
+                                     name="LINE_IR",
                                      daemon=True),
-                    threading.Thread(target=t11_thread_LED, args=(robot, args.sensor_interval), name="LED_IR",
+                    threading.Thread(target=t11_thread_LED, args=(robot_instance, args_instance.sensor_interval),
+                                     name="LED_IR",
                                      daemon=True),
-                    threading.Thread(target=t11_thread_controller, args=(robot, args.ctrl_interval), name="CTRL_IR",
+                    threading.Thread(target=t11_thread_controller, args=(robot_instance, args_instance.ctrl_interval),
+                                     name="CTRL_IR",
                                      daemon=True),
-                    threading.Thread(target=t11_thread_buzzer, args=(robot,), name="BUZZER", daemon=True),
+                    threading.Thread(target=t11_thread_buzzer, args=(robot_instance,), name="BUZZER", daemon=True),
                 ]
+            ),
+            "Obstacles": StepConfig(
+                camera_angle=90,
+                thread_factory=lambda: []  # Ajoutez vos threads spécifiques aux Obstacles ici si nécessaire
             ),
             "Labyrinthe": StepConfig(
                 camera_angle=110,
                 thread_factory=lambda: [
-                    threading.Thread(target=labyrinthe_thread_ultrasonic, args=(robot, args.sensor_interval),
+                    threading.Thread(target=labyrinthe_thread_ultrasonic,
+                                     args=(robot_instance, args_instance.sensor_interval),
                                      name="US_Labyrinthe", daemon=True),
-                    threading.Thread(target=labyrinthe_thread_drive, args=(robot, args.sensor_interval, self.camera),
+                    threading.Thread(target=labyrinthe_thread_drive,
+                                     args=(robot_instance, args_instance.sensor_interval, self.camera),
                                      name="Camera_Labyrinthe", daemon=True)
                 ]
             ),
-            "Camera Line": StepConfig(
+            "Flèches": StepConfig(
                 camera_angle=60,
                 thread_factory=lambda: [
-                    threading.Thread(target=thread_camera_line, args=(robot, CTRL_INTERVAL), name="CTRL", daemon=True),
-                    threading.Thread(target=thread_camera_line_US, args=(robot, US_INTERVAL), name="US", daemon=True),
-                    threading.Thread(target=thread_camera_line_LED, args=(robot, LED_INTERVAL), name="LED",
+                    threading.Thread(target=thread_camera_line, args=(robot_instance, CTRL_INTERVAL), name="CTRL",
                                      daemon=True),
-                    threading.Thread(target=thread_camera_loop, args=(robot,), name="CAM_AUTO", daemon=True),
+                    threading.Thread(target=thread_camera_line_US, args=(robot_instance, US_INTERVAL), name="US",
+                                     daemon=True),
+                    threading.Thread(target=thread_camera_line_LED, args=(robot_instance, LED_INTERVAL), name="LED",
+                                     daemon=True),
+                    threading.Thread(target=thread_camera_loop, args=(robot_instance,), name="CAM_AUTO", daemon=True),
                     threading.Thread(
                         target=lambda: app_camera_line.run(host="0.0.0.0", port=5000, debug=False, threaded=True,
                                                            use_reloader=False),
                         name="WEB_CAM_LINE", daemon=True
                     )
                 ]
-            ),
-            "Obstacles": StepConfig(
-                camera_angle=90,
-                thread_factory=lambda: []
             )
         }
 
@@ -154,49 +166,15 @@ class RobotStepManager:
             step_config.stop()
 
 
-# ── FONCTIONS POUR FLASK ET CAPTURE LIVE INDÉPENDANTE ─────────────────────────
+# ── FONCTIONS POUR FLASK ET CAPTURE LIVE PURE (SANS DÉTECTION) ────────────────
 
 def thread_global_camera_capture(camera_instance: Picamera2, log_instance):
-    """Met à jour en tâche de fond l'image brute de la caméra et détecte le rouge en bas."""
-    global latest_frame, system_running, target_step
+    """Met à jour en tâche de fond l'image brute de la caméra (supervision pure)."""
+    global latest_frame, system_running
     while system_running:
         try:
             frame = camera_instance.capture_array()
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-            # --- DÉTECTION DU ROUGE DANS LE BAS DE L'IMAGE ---
-            height, width = frame_bgr.shape[:2]
-            # Définition de la ROI (20% inférieur de l'image)
-            roi_top = int(height * 0.80)
-            roi = frame_bgr[roi_top:height, 0:width]
-
-            # Conversion HSV et masquage du rouge
-            hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            lower_red1 = np.array([0, 100, 100])
-            upper_red1 = np.array([10, 255, 255])
-            lower_red2 = np.array([160, 100, 100])
-            upper_red2 = np.array([180, 255, 255])
-
-            mask1 = cv2.inRange(hsv_roi, lower_red1, upper_red1)
-            mask2 = cv2.inRange(hsv_roi, lower_red2, upper_red2)
-            red_mask = cv2.bitwise_or(mask1, mask2)
-
-            red_pixels = cv2.countNonZero(red_mask)
-            if red_pixels > 400 and target_step != "Camera Line":
-                log_instance.info(f"    Rouge détecté en bas --> bascule automatique vers Camera Line.")
-                target_step = "Camera Line"
-            cv2.rectangle(frame_bgr, (0, roi_top), (width, height), (0, 0, 255) if red_pixels > 400 else (0, 255, 0), 2)
-            cv2.putText(frame_bgr, f"Zone Rouge: {red_pixels}px", (10, roi_top - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255) if red_pixels > 400 else (0, 255, 0), 1)
-
-            hsv_full = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-            panneau = classify_sign(hsv_full)
-            if panneau == "Tunnel" and target_step != "Labyrinthe":
-                log_instance.info("Panneau Tunnel détecté --> bascule vers Labyrinthe.")
-                target_step = "Labyrinthe"
-            elif panneau == "Travaux" and target_step != "Obstacles":
-                log_instance.info("Panneau Travaux détecté --> bascule vers Obstacles.")
-                target_step = "Obstacles"
 
             with frame_lock:
                 latest_frame = frame_bgr.copy()
@@ -224,25 +202,87 @@ def generate_global_frames():
 
 @app_global.route('/')
 def index():
-    """Interface HTML épurée pour la supervision globale."""
+    """Interface HTML épurée avec les nouveaux boutons du circuit."""
     return render_template_string("""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Supervision Globale - Team C</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { font-family: sans-serif; background: #121214; color: #e1e1e6; text-align: center; padding: 20px; }
-            h1 { color: #04d361; }
-            .container { max-width: 700px; margin: 0 auto; background: #202024; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-            img { width: 100%; border-radius: 4px; border: 2px solid #29292e; max-width: 640px; }
-            .info { margin-top: 15px; font-size: 1.1em; color: #a8a8b3; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121214; color: #e1e1e6; text-align: center; padding: 20px; margin: 0; }
+            h1 { color: #04d361; margin-bottom: 20px; }
+            .container { max-width: 750px; margin: 0 auto; background: #202024; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+            .video-box { position: relative; display: inline-block; width: 100%; max-width: 640px; }
+            img { width: 100%; border-radius: 6px; border: 2px solid #29292e; background: #000; }
+
+            .section-title { font-size: 1.1em; color: #04d361; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 10px 0; font-weight: bold;}
+            .btn-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 15px; }
+
+            button { background: #29292e; color: #e1e1e6; border: 2px solid #3e3e44; padding: 12px 24px; font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; min-width: 140px; }
+            button:hover { background: #3e3e44; border-color: #04d361; }
+            button:active { transform: scale(0.98); }
+
+            button.btn-start { background: #1b4d22; border-color: #2e7d32; color: #a5d6a7; }
+            button.btn-start:hover { background: #2e7d32; }
+            button.btn-stop { background: #661a1a; border-color: #c62828; color: #ef9a9a; }
+            button.btn-stop:hover { background: #c62828; }
+
+            .status-panel { background: #1a1a1e; padding: 12px; border-radius: 6px; margin-top: 15px; border: 1px solid #29292e; display: flex; justify-content: space-around; font-size: 0.95em; }
+            .status-val { color: #04d361; font-weight: bold; }
         </style>
+        <script>
+            function sendCommand(endpoint, param='') {
+                let url = endpoint + (param ? '?mode=' + param : '');
+                fetch(url, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        document.getElementById('current-mode-status').innerText = data.current_step;
+                        document.getElementById('motor-status').innerText = data.emergency_stop ? "STOPPÉ" : "ACTIF";
+                        document.getElementById('motor-status').style.color = data.emergency_stop ? "#ef9a9a" : "#04d361";
+                    }
+                })
+                .catch(err => console.error('Erreur:', err));
+            }
+
+            setInterval(() => {
+                fetch('/status')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('current-mode-status').innerText = data.current_step;
+                    document.getElementById('motor-status').innerText = data.emergency_stop ? "STOPPÉ" : "ACTIF";
+                    document.getElementById('motor-status').style.color = data.emergency_stop ? "#ef9a9a" : "#04d361";
+                });
+            }, 1000);
+        </script>
     </head>
     <body>
         <div class="container">
-            <h1>Cockpit de Vidéo-Surveillance Live</h1>
-            <img src="/video_feed">
-            <div class="info">Serveur Principal de Flux Brut - Robot Team C</div>
+            <h1>Cockpit de Contrôle Manuel — Team C</h1>
+
+            <div class="video-box">
+                <img src="/video_feed" alt="Flux vidéo live">
+            </div>
+
+            <div class="status-panel">
+                <div>État Moteurs: <span id="motor-status" class="status-val">--</span></div>
+                <div>Mode Actif: <span id="current-mode-status" class="status-val">--</span></div>
+            </div>
+
+            <div class="section-title">Commandes Générales</div>
+            <div class="btn-group">
+                <button class="btn-start" onclick="sendCommand('/control/start')">START</button>
+                <button class="btn-stop" onclick="sendCommand('/control/stop')">STOP</button>
+            </div>
+
+            <div class="section-title">Sélection du Mode (Circuit)</div>
+            <div class="btn-group">
+                <button onclick="sendCommand('/control/mode', '1')">Line Following</button>
+                <button onclick="sendCommand('/control/mode', '2')">Obstacles</button>
+                <button onclick="sendCommand('/control/mode', '3')">Labyrinthe</button>
+                <button onclick="sendCommand('/control/mode', '4')">Flèches</button>
+            </div>
         </div>
     </body>
     </html>
@@ -254,63 +294,45 @@ def video_feed():
     return Response(generate_global_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-# ── CONFIGURATION DES ENTRÉES CLAVIER ASYNCHRONES VIA INPUT() ─────────────────
+# ── ENDPOINTS API POUR LES BOUTONS WEB ────────────────────────────────────────
 
-def thread_keyboard_listener(robot_instance: Robot, manager: RobotStepManager, log_instance):
-    """Écoute la console en arrière-plan sans bloquer la boucle principale du programme."""
-    global system_running, target_step
-    print("\n" + "=" * 60)
-    print(" CONTRÔLES CLAVIER DISPONIBLES :")
-    print(" -> Taper [start]    : Lancer / Continuer le robot")
-    print(" -> Taper [stop]     : Arrêter immédiatement le robot (Moteurs OFF)")
-    print(" -> [Entrée (vide)]  : Intervertir l'état actuel (Arrêt/Continuer)")
-    print(" -> Appuyez sur [1]  : Passer au mode 'Line following'")
-    print(" -> Appuyez sur [2]  : Passer au mode 'Labyrinthe'")
-    print(" -> Appuyez sur [3]  : Passer au mode 'Camera Line'")
-    print(" -> Appuyez sur [4]  : Passer au mode 'Obstacles'")
-    print("=" * 60 + "\n")
+@app_global.route('/status', methods=['GET'])
+def get_status():
+    return jsonify({
+        "current_step": step_manager.current_step if step_manager else "Unknown",
+        "emergency_stop": robot.state.emergency_stop if robot else True
+    })
 
-    while system_running:
-        try:
-            # Utilisation directe et propre de input() natif
-            user_input = input().strip().lower()
 
-            # Ordre d'arrêt explicite
-            if user_input == "stop":
-                with robot_instance.state.lock:
-                    robot_instance.state.emergency_stop = True
-                robot_instance.motor.stop()
-                log_instance.warning("🛑 CLAVIER : ARRÊT DU ROBOT EFFECTUÉ")
+@app_global.route('/control/start', methods=['POST'])
+def web_start():
+    global robot, log
+    with robot.state.lock:
+        robot.state.emergency_stop = False
+    log.info("🌐 WEB : Réarmement des moteurs (START)")
+    return jsonify({"status": "success", "emergency_stop": False, "current_step": step_manager.current_step})
 
-            # Ordre de démarrage explicite
-            elif user_input == "start":
-                with robot_instance.state.lock:
-                    robot_instance.state.emergency_stop = False
-                log_instance.info(" CLAVIER : DÉMARRAGE ET ENVOI DU ROBOT")
 
-            # Commutation par touche entrée vide (Toggle)
-            elif user_input == "":
-                with robot_instance.state.lock:
-                    current_estop = robot_instance.state.emergency_stop
-                    robot_instance.state.emergency_stop = not current_estop
+@app_global.route('/control/stop', methods=['POST'])
+def web_stop():
+    global robot, log
+    with robot.state.lock:
+        robot.state.emergency_stop = True
+    robot.motor.stop()
+    log.warning("🛑 WEB : Arrêt immédiat (STOP)")
+    return jsonify({"status": "success", "emergency_stop": True, "current_step": step_manager.current_step})
 
-                    if robot_instance.state.emergency_stop:
-                        log_instance.warning("  CLAVIER -> ARRÊT (Moteurs stoppés)")
-                        robot_instance.motor.stop()
-                    else:
-                        log_instance.info(" CLAVIER -> CONTINUER (Moteurs réarmés)")
 
-            # Basculement vers les différentes étapes du robot
-            elif user_input in manager.step_mapping:
-                next_step = manager.step_mapping[user_input]
-                target_step = next_step
-                log_instance.info(f"🔄 Demande de transition clavier reçue -> Mode : '{next_step}'")
-
-        except (IOError, EOFError):
-            break
-        except Exception as e:
-            log_instance.error(f"Erreur d'écoute clavier : {e}")
-        time.sleep(0.1)
+@app_global.route('/control/mode', methods=['POST'])
+def web_change_mode():
+    global step_manager, target_step, log
+    mode_id = request.args.get('mode')
+    if mode_id in step_manager.step_mapping:
+        next_step = step_manager.step_mapping[mode_id]
+        target_step = next_step
+        log.info(f"🔄 WEB : Transition manuelle demandée -> Mode : '{next_step}'")
+        return jsonify({"status": "success", "emergency_stop": robot.state.emergency_stop, "current_step": next_step})
+    return jsonify({"status": "error", "message": "Mode invalide"}), 400
 
 
 # ── POINT D'ENTRÉE PRINCIPAL D'EXÉCUTION ──────────────────────────────────────
@@ -335,11 +357,9 @@ if __name__ == "__main__":
     step_manager = RobotStepManager(robot, camera, args)
     step_manager.initialize()
 
-    # Threads transverses globaux
+    # Threads transverses globaux (uniquement la capture brute et le serveur Flask)
     global_threads = [
         threading.Thread(target=thread_global_camera_capture, args=(camera, log), name="GLOBAL_CAM", daemon=True),
-        threading.Thread(target=thread_keyboard_listener, args=(robot, step_manager, log), name="KEYBOARD",
-                         daemon=True),
         threading.Thread(
             target=lambda: app_global.run(host="0.0.0.0", port=5001, debug=False, threaded=True, use_reloader=False),
             name="WEB_GLOBAL", daemon=True
@@ -349,7 +369,7 @@ if __name__ == "__main__":
     for gt in global_threads:
         gt.start()
 
-    log.info("📡 Serveur global de streaming disponible sur http://localhost:5001")
+    log.info("📡 Serveur global disponible sur http://localhost:5001")
 
     try:
         while True:
