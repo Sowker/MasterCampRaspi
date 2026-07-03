@@ -217,7 +217,9 @@ def main(robot: Robot, args: str, camera: Picamera2, log: str):
             match action:
                 case "Transition Line following":
                     step_manager.transition_to("Transition Line following")
+                    print("TRANSITION LINE FOLLOWING ")
                 case "Line following":
+                    print("LINE FOLLOWING")
                     step_manager.transition_to("Line following")
                 case "Obstacles":
                     step_manager.transition_to("Obstacles")
