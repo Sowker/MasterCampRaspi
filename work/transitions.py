@@ -30,7 +30,7 @@ def calibration_sequence_obstacles_to_camera_line(robot_instance: Robot) -> str:
 
     robot_instance.motor.reset()
     robot_instance.head.set_angle_motor(2, 60)
-    time.sleep(0.5)
+    time.sleep(1.3)
 
     print("[SYS] CALIBRATION_OK: LIGNE_ROUGE -> Passage automatique à 'Camera Line'")
     return "Camera Line"
