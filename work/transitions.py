@@ -12,7 +12,10 @@ def calibration_sequence_IR_to_obstacles(robot_instance: Robot) -> str:
 
     robot_instance.motor.reset()
     robot_instance.head.set_angle_motor(0, 90)
-    time.sleep(0.3)
+    robot_instance.motor.drive(camera_line3.Direction.FORWARD, 20, fast_accel=True)
+    time.sleep(0.4)
+    robot_instance.motor.reset()
+
 
     print("[SYS] CALIBRATION_OK: OBSTACLES -> Passage automatique à 'Obstacles'")
     return "Obstacles"
