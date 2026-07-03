@@ -33,7 +33,7 @@ MODE = MODE_AVOID_OBJ
 scan = []
 
 SCAN_ANGLE = 60
-SCAN_DIST_ACTION = 15 # in cm !!!
+SCAN_DIST_ACTION = 18 # in cm !!!
 
 TURN_RIGHT = True
 TURN_LEFT = False
