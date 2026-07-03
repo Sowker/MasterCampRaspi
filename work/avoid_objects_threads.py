@@ -270,16 +270,16 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
         robot.head.set_angle_motor(0, counter_turn)
         time.sleep(0.3)
         robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
-        time.sleep(1.5 * sleep_time)
+        time.sleep(1 * sleep_time)
         robot.motor.stop()
 
         if MODE == MODE_AVOID_LINE: return
 
-        # realign
-        robot.head.set_angle_motor(0, turn)
-        time.sleep(0.3)
-        robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
-        time.sleep(sleep_time * 0.3)
+        # # realign
+        # robot.head.set_angle_motor(0, turn)
+        # time.sleep(0.3)
+        # robot.motor.drive(Direction.FORWARD, BYPASS_SPEED)
+        # time.sleep(sleep_time * 0.3)
 
         if MODE == MODE_AVOID_LINE: return
 
