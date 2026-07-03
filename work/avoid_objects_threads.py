@@ -73,7 +73,7 @@ def thread_ultrasonic_scanning(robot: Robot, interval: float) -> None:
             distance_cm = robot.ultrasonic.read_mm()/10
             data.append(distance_cm)
             data_str = str(round(distance_cm, 1)) + " " + data_str
-        print(data_str)
+        # print(data_str)
         robot.head.set_angle_motor(HR_MOTOR, HEAD_ANGLE_CENTER)
         return data
 
@@ -328,6 +328,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
 
                     if MODE == MODE_AVOID_LINE: return
                     if last_turn is not None:
+                        print("not None")
                         if bypass_side(min_dist_idx) == TURN_RIGHT:
                             right_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_RIGHT
@@ -335,6 +336,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                             left_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_LEFT
                     else:
+                        print("None")
                         if last_turn == TURN_RIGHT:
                             left_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_LEFT
