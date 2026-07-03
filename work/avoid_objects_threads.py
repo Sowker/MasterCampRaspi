@@ -325,8 +325,9 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                     # print("min_dist_idx", min_dist_idx)
 
                     if MODE == MODE_AVOID_LINE: return
-                    if last_turn is not None:
-                        print("not None")
+                    if last_turn is None:
+                        print(" None")
+                        print(bypass_side(min_dist_idx))
                         if bypass_side(min_dist_idx) == TURN_RIGHT:
                             right_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_RIGHT
@@ -334,7 +335,7 @@ def thread_object_controller(robot: Robot, interval: float) -> None:
                             left_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_LEFT
                     else:
-                        print("None")
+                        print("not None")
                         if last_turn == TURN_RIGHT:
                             left_bypass(min_dist_idx, min_dist)
                             last_turn = TURN_LEFT
