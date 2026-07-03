@@ -34,6 +34,8 @@ def calibration_sequence_obstacles_to_camera_line(robot_instance: Robot) -> None
 
     log.info("[SYS] CALIBRATION_OK: LIGNE_ROUGE -> Transition demandée vers 'Camera Line'")
     target_step = "Camera Line"
+    with robot_instance.state.lock:
+        robot_instance.state.running = True
 
 
 def calibration_sequence_camera_to_labyrinth(robot_instance: Robot) -> None:
