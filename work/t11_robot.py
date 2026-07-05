@@ -46,6 +46,7 @@ class RobotState:
     shutdown:       bool = False   # TRUE -> kill the robot
     already_lost:   bool = False   # True -> count until he is really lost
     last_turn:      str  = 0       # -1 : Gauche, 0 : Tout droit, 1 : Droite
+    action:         str  = 0       # hold all the actions of the robot
 
 
 # ═══════════════════════════════════════════════════════════════════
